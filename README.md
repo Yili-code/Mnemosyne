@@ -1,145 +1,213 @@
 # Mnemosyne
 
-Mnemosyne 是一個為個人使用設計的 Telegram 英文記憶系統。傳送一個英文單字後，Bot 會透過
-Gemini 產生 KK 音標、繁體中文解釋、例句、實際用法、常見搭配，以及語意或使用情境相關的獨立
-單字。每天台北時間 08:00，再依 weighted review 從資料庫選出 20 個單字複習。
+> A production-oriented Telegram vocabulary learning bot powered by Gemini, FastAPI, Firestore,
+> and Google Cloud Run.
 
-## 它解決什麼問題
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Google Cloud Run](https://img.shields.io/badge/Google_Cloud-Run-4285F4?logo=googlecloud&logoColor=white)](https://cloud.google.com/run)
+[![CI](https://github.com/Yili-code/Mnemosyne/actions/workflows/ci.yml/badge.svg)](https://github.com/Yili-code/Mnemosyne/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-一般字典解決「現在看不懂」，但沒有處理「幾天後還記不記得」。Mnemosyne 把查詢、保存與
-再提取放在同一個 loop：
+Mnemosyne turns a quick vocabulary lookup into a durable learning loop. Send one English word to
+the Telegram bot and receive a concise card with KK phonetics, Traditional Chinese definitions,
+usage notes, collocations, examples, and semantically related vocabulary. Every result is stored for
+weighted daily review.
 
-1. 你主動查一個單字。
-2. Gemini 產生結構固定的學習卡。
-3. 程式過濾普通時態、複數與常規衍生詞。
-4. 主單字和相關單字都存進資料庫。
-5. 每天優先抽出新字、較少出現的字、久未複習的字。
+The project is intentionally small, but it treats external AI, webhooks, scheduled jobs, secrets,
+and persistent state as production concerns rather than demo details.
 
-這個設計的實際價值是從 recognition 走向 recall。對工程學習而言，它也示範了 webhook、
-structured output、資料持久化、排程、idempotency 和 serverless deployment 如何一起構成
-一個可運作的 AI product。
+## Why it exists
 
-## 相關單字的定義
+A dictionary helps with recognition now; learning requires recall later. Mnemosyne connects both:
 
-「相關」不是 TOEIC／IELTS／Daily 標籤，而是經常出現在這些英文情境中的獨立詞彙，例如：
+1. Look up a word in Telegram.
+2. Generate a schema-validated learning card with Gemini.
+3. Reject low-value inflections and routine word-family derivatives.
+4. Save the headword and related vocabulary.
+5. Resurface newer and overdue words through weighted review.
 
-- synonym / antonym
-- 同一工作、旅行、學術或日常情境常一起使用的字
-- 容易混淆、值得比較的字
-- 概念上直接相鄰的字
+## Highlights
 
-預設排除複數、過去式、`-ing`，以及普通的名詞／動詞／形容詞／副詞衍生。只有意義已
-明顯獨立、且 Gemini 提供具體理由時，才允許例外。
+- **Structured AI output** — Pydantic validates every Gemini response before persistence.
+- **Useful related vocabulary** — deterministic rules remove plurals, tense variants, and ordinary
+  derivations that a prompt alone may still produce.
+- **Durable retry queue** — failed generations survive process restarts and retry with capped
+  backoff instead of asking the user to resend a word.
+- **Storage abstraction** — SQLite supports local development; Firestore supports stateless Cloud
+  Run deployments through the same repository contract.
+- **Idempotent delivery** — Telegram update IDs and daily-delivery records prevent duplicate work.
+- **Least-privilege deployment** — runtime credentials live in Secret Manager and Firestore access
+  comes from the Cloud Run service account.
+- **Cost-aware operation** — scale-to-zero compute, bounded concurrency, one retry item per request,
+  and documented billing controls.
 
-## 系統結構
+## Example
+
+Send:
 
 ```text
-Telegram message
-      ↓ webhook + secret validation
-Cloud Run / FastAPI
-      ├── Gemini structured JSON → schema validation → derivation filter
-      ├── Firestore → words, review state, processed updates
-      └── Telegram Bot API → readable HTML reply
-
-Cloud Scheduler (08:00 Asia/Taipei)
-      ↓ authenticated-by-secret daily endpoint
-weighted selection → Telegram daily review → update review state
+meticulous
 ```
 
-Cloud Run 使用 Firestore；本機開發可使用 SQLite。這不是兩套產品，而是同一個 repository
-interface 的兩個實作，讓測試不需要連線雲端，同時避免把 Cloud Run 的暫存磁碟誤當永久資料庫。
+Receive a card shaped like:
+
+```text
+meticulous
+[məˈtɪkjələs] · adjective
+
+中文釋義
+一絲不苟的；非常仔細的
+
+用法
+常用於描述對細節極度謹慎的人或工作方式。
+
+例句
+She kept meticulous records of every transaction.
+
+相關單字
+thorough [ˈθɝo]
+徹底的 · emphasizes completeness
+The team conducted a thorough review.
+```
+
+## Telegram commands
+
+| Command | Purpose |
+| --- | --- |
+| `word` | Generate and save a vocabulary card |
+| `/review` | Start an additional weighted review without examples |
+| `/words` | List every stored word, part of speech, and Chinese meaning |
+| `/stats` | Show the number of stored words |
+| `/help` | Show in-bot usage instructions |
+
+The bot responds only to the configured owner's private chat.
+
+## Architecture
+
+```text
+Telegram
+   │ signed webhook
+   ▼
+Cloud Run / FastAPI ───────► Gemini API
+   │                            │
+   │ validated card             │ transient or validation failure
+   ▼                            ▼
+Firestore ◄──────────── pending_words queue
+   │                            ▲
+   │ weighted vocabulary       │ every 10 minutes
+   ▼                            │
+Telegram ◄──────────── Cloud Scheduler
+```
+
+Cloud Run is ephemeral; Firestore owns durable state. Cloud Scheduler invokes protected endpoints
+for daily review and failed-word recovery. This separation keeps request handling stateless without
+pretending a container's local SQLite file is permanent cloud storage.
+
+## Reliability model
+
+Gemini failures are classified without logging credentials or full provider responses. Failed words
+are persisted and retried after 15 minutes, 1 hour, 6 hours, and then once per day until successful.
+Firestore claims use a short transactional lease so overlapping scheduler invocations do not process
+the same item concurrently.
+
+The system combines three control layers:
+
+1. **Semantic control:** Gemini selects useful related vocabulary.
+2. **Structural control:** Pydantic constrains fields, types, and lengths.
+3. **Deterministic control:** Python rules reject predictable word-family noise.
+
+This boundary matters because prompting is probabilistic; product rules should be testable.
 
 ## Weighted review
 
-每個單字的權重由兩部分構成：
+Review priority is calculated as:
 
-- `novelty = 5 / (1 + review_count)`：出現越少次，優先度越高。
-- `spacing = 1 + days_since_review / 7`：離上次複習越久，優先度越高，上限 30 天。
+```text
+5 / (1 + review_count) + 1 + min(days_since_review, 30) / 7
+```
 
-程式使用 weighted sampling without replacement，所以同一份日報不會重複抽到同一個字。
-這比完全隨機更接近學習目標，也仍保留變化性。
+The first term favors unfamiliar words. The second favors words not reviewed recently. Sampling is
+weighted and without replacement, so one review does not repeat the same word.
 
-## Telegram 指令
+## Quick start
 
-- 直接傳送一個英文單字：建立並保存學習卡
-- `/help`：使用說明
-- `/stats`：資料庫單字總數
-- `/words`：列出資料庫內所有單字、詞性與中文意思
-- `/review`：立即產生一輪額外複習，不占用當日 08:00 的排程紀錄
-
-Bot 只處理 `TELEGRAM_OWNER_CHAT_ID` 對應的私人聊天室。
-
-## 自動重試
-
-Gemini 的 timeout、quota、服務暫時不可用或輸出未通過 schema／詞形規則時，系統不會丟失查詢。
-失敗單字會保存到 repository 的 `pending_words` queue，依序在 15 分鐘、1 小時、6 小時後重試，
-之後每天重試一次直到成功。成功後會寫入正式單字庫、移除 queue item，並主動把學習卡傳回
-Telegram。
-
-Cloud Run 不會在沒有 request 時自行執行背景 timer，因此 production 必須由 Cloud Scheduler 每
-10 分鐘呼叫 `/tasks/retry-failed`。每次只處理一個到期項目，控制 Gemini 用量並避免 request timeout。
-
-## 本機執行
-
-需求：Python 3.11+。
+Requirements: Python 3.11+.
 
 ```powershell
+git clone https://github.com/Yili-code/Mnemosyne.git
+cd Mnemosyne
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-填寫 `.env` 後啟動：
+Fill in `.env`, then run locally:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn vocab_bot.app:app --reload
 ```
 
-本機模式預設使用 `data/vocabulary.sqlite3`。`.env` 和 SQLite 檔案都被 Git 忽略。
+Local development defaults to SQLite. Never commit the populated `.env` or local database.
 
-執行驗證：
+## Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Token issued by BotFather |
+| `TELEGRAM_OWNER_CHAT_ID` | Only private chat allowed to use the bot |
+| `TELEGRAM_WEBHOOK_SECRET` | Validates Telegram webhook requests |
+| `GEMINI_API_KEY` | Gemini API credential |
+| `GEMINI_MODEL` | Model ID used for structured generation |
+| `CRON_SECRET` | Protects scheduler endpoints |
+| `STORAGE_BACKEND` | `sqlite` locally or `firestore` in production |
+| `GOOGLE_CLOUD_PROJECT` | Firestore project when using the cloud backend |
+| `REVIEW_SIZE` | Number of words in a daily review |
+| `TIMEZONE` | Review timezone, defaulting to `Asia/Taipei` |
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete Cloud Run, Firestore, IAM, Secret Manager,
+webhook, scheduler, billing, and troubleshooting walkthrough.
+
+## Verification
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp
+.\.venv\Scripts\python.exe -m pytest
 .\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m ruff format --check .
 ```
 
-## 雲端部署與費用
+The automated suite covers input normalization, derivative filtering, SQLite persistence, retry
+backoff, idempotency, weighted selection, Gemini payload shape, and Telegram rendering. The deployed
+system has also been exercised end to end with Telegram, Gemini, Cloud Run, Firestore, Secret
+Manager, and Cloud Scheduler; credentials and live user data are intentionally not part of this
+repository.
 
-完整步驟見 [DEPLOYMENT.md](DEPLOYMENT.md)。推薦組合：
+## Project layout
 
-- Cloud Run：接收 Telegram webhook，需要時才啟動
-- Firestore：永久保存單字和複習狀態
-- Cloud Scheduler：每天 08:00 呼叫 daily endpoint
-- Gemini API：產生結構化學習內容
+```text
+src/vocab_bot/
+├── app.py          FastAPI endpoints and dependency wiring
+├── config.py       Environment configuration
+├── gemini.py       Structured generation and provider error boundaries
+├── models.py       Validated domain models
+├── repository.py   SQLite and Firestore implementations
+├── service.py      Application workflow and retry policy
+├── telegram.py     Telegram client and HTML rendering
+└── word_rules.py   Input and derivative filters
 
-以單人、每天少量查字的規模，預期會落在免費額度內，但「免費額度」不是絕對零費用保證。
-Google Cloud 仍可能要求 billing account，錯誤設定或超額使用也可能計費。請建立 budget alert，
-並維持 Cloud Run `min-instances=0`、`max-instances=1`。
+scripts/
+└── setup_webhook.py
 
-截至 2026-09-24，官方頁面列出的主要免費額度包括：
+tests/
+└── unit and service-level behavior tests
+```
 
-- [Cloud Run pricing](https://cloud.google.com/run/pricing)：request-based services 每月
-  200 萬次 requests，另有 CPU/RAM 額度。
-- [Firestore pricing](https://cloud.google.com/firestore/pricing)：一個 free database，
-  每日 50,000 reads、20,000 writes，並有 1 GiB storage。
-- [Cloud Scheduler pricing](https://cloud.google.com/scheduler/pricing)：每個 billing account
-  前 3 個 jobs 免費。
-- [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)：free tier 與價格依模型而異。
+## Security
 
-價格會變動，部署前應重新檢查官方頁面。
+Do not place real credentials in issues, logs, screenshots, or commits. Production secrets belong in
+Google Secret Manager, and the Cloud Run service account should receive only the permissions it
+needs. See [SECURITY.md](SECURITY.md) for reporting and deployment guidance.
 
-## 安全與可靠性
+## License
 
-- Telegram webhook header 必須通過 shared secret。
-- 排程 endpoint 使用另一組 secret，避免被公開觸發。
-- API keys 只放在 `.env` 或 Secret Manager。
-- Telegram `update_id` 會保存，避免 webhook retry 造成重複處理。
-- Gemini 回傳必須通過 Pydantic schema 和額外詞形規則，失敗時不寫入資料庫。
-- 每日正常排程有 date-level delivery record，Scheduler retry 不會重複傳送。
-
-## 目前驗證邊界
-
-自動測試涵蓋詞形過濾、SQLite 寫入、update idempotency、weighted selection 與 Telegram rendering。
-沒有真正的 Token/API key 時，不應宣稱 Gemini、Telegram 或 GCP production deployment 已完成 live
-驗證。
+Released under the [MIT License](LICENSE).

@@ -1,11 +1,14 @@
 .env
+.private/
 .venv/
 __pycache__/
 .pytest_cache/
-.pytest-tmp*/
-.pytest-status-*/
+.pytest-*/
 .ruff_cache/
 *.pyc
 *.sqlite3
 coverage.xml
-.coverage
+.coverage*
+build/
+dist/
+*.egg-info/

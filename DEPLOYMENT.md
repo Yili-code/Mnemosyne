@@ -40,7 +40,7 @@ Cloud Scheduler → protected endpoint → Cloud Run → Telegram
 4. 建立 Google Cloud project，啟用 billing，並在 Billing → Budgets & alerts 建立低額警示。
 5. 產生兩個不同的長隨機字串，分別作為 webhook secret 與 cron secret。
 
-不要把任何真實值貼進 README、DEVLOG、Git commit 或公開 issue。
+不要把任何真實值貼進 README、私人筆記、Git commit 或公開 issue。
 
 ## 2. 啟用服務
 
@@ -70,6 +70,10 @@ Firestore database 建立後，仍需完成兩件不同的事：
 - `telegram-webhook-secret`
 - `gemini-api-key`
 - `cron-secret`
+
+部署時建議引用明確的 secret version，而不是長期依賴 `latest`。這讓每個 Cloud Run revision
+使用哪一版 credential 都可追溯；輪替時先新增版本、部署並驗證，再停用舊版本。下方第一次
+部署使用 `latest` 是為了降低入門步驟，正式環境完成後應改成實際 version number。
 
 Cloud Run 使用的 service account 必須具備：
 
@@ -146,8 +150,14 @@ Cloud Run scale-to-zero 後沒有常駐 process，因此不能靠 Python `sleep`
 
 - Cloud Run 保持 `min-instances=0`、`max-instances=1`。
 - 建立 billing budget alert。注意：budget alert 是通知，不是自動停機上限。
+- 若使用 Gemini Prepay，先小額儲值並關閉 auto-reload，再設定 project spend cap；Gemini 餘額
+  與一般 Google Cloud 帳單是不同的控制面。
 - 在 Gemini API project 設定 quota；個人 bot 不需要高 RPM。
 - 定期查看 Cloud Run requests、Firestore reads/writes 與 Gemini usage。
+
+Cloud Run、Firestore、Cloud Scheduler 與 Gemini 各自有不同的免費額度、計費週期與停止條件。
+價格會變動，部署前應重新檢查
+[Gemini billing](https://ai.google.dev/gemini-api/docs/billing) 與各服務官方 pricing 頁面。
 
 ## 9. Production checklist
 
