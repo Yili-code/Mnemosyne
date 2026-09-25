@@ -10,6 +10,7 @@ def make_card() -> VocabularyCard:
     example = Example(english="We can leverage this tool.", chinese="我們可以善用這項工具。")
     return VocabularyCard(
         word="leverage",
+        kk_phonetic="ˈlɛvərɪdʒ",
         part_of_speech=["verb"],
         meanings_zh=["善用"],
         usage_notes=["常用於商業與科技情境"],
@@ -18,6 +19,7 @@ def make_card() -> VocabularyCard:
         related_words=[
             RelatedWord(
                 word=word,
+                kk_phonetic="rɪˈleɪtɪd",
                 meaning_zh=meaning,
                 connection="在相似情境中使用",
                 example=Example(english=f"We {word} resources.", chinese="我們善用資源。"),

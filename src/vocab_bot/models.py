@@ -12,6 +12,9 @@ class Example(BaseModel):
 
 class RelatedWord(BaseModel):
     word: str = Field(pattern=r"^[A-Za-z][A-Za-z -]{0,48}[A-Za-z]$|^[A-Za-z]$")
+    kk_phonetic: str = Field(
+        default="", max_length=80, description="KK phonetic symbols without brackets"
+    )
     meaning_zh: str = Field(min_length=1, max_length=100)
     connection: str = Field(min_length=2, max_length=160)
     example: Example
@@ -28,6 +31,9 @@ class VocabularyCard(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     word: str
+    kk_phonetic: str = Field(
+        min_length=1, max_length=80, description="KK phonetic symbols without brackets"
+    )
     part_of_speech: list[str] = Field(min_length=1, max_length=3)
     meanings_zh: list[str] = Field(min_length=1, max_length=3)
     usage_notes: list[str] = Field(min_length=1, max_length=4)
@@ -43,6 +49,7 @@ class VocabularyCard(BaseModel):
 
 class StoredWord(BaseModel):
     word: str
+    kk_phonetic: str = ""
     part_of_speech: list[str] = Field(default_factory=list)
     meanings_zh: list[str]
     usage_notes: list[str] = Field(default_factory=list)

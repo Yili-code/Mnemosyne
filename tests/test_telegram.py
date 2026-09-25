@@ -6,11 +6,15 @@ from .test_repository import make_card
 
 def test_render_card_has_learning_sections_but_no_exam_labels() -> None:
     rendered = render_card(make_card())
+    assert "[ˈlɛvərɪdʒ]" in rendered
     assert "用法" in rendered
     assert "例句" in rendered
     assert "相關單字" in rendered
     assert "TOEIC" not in rendered
     assert "IELTS" not in rendered
+    assert "📘" not in rendered
+    assert "我們善用資源" not in rendered
+    assert "\n\n<b>相關單字</b>\n" in rendered
 
 
 def test_daily_review_renders_all_selected_words() -> None:

@@ -37,25 +37,31 @@ class TelegramClient:
             raise TelegramError("Telegram message delivery failed") from exc
 
 
+def _phonetic(value: str) -> str:
+    cleaned = value.strip().strip("/[] ")
+    return f"[{html.escape(cleaned)}]" if cleaned else ""
+
+
 def render_card(card: VocabularyCard) -> str:
     meanings = "；".join(html.escape(item) for item in card.meanings_zh)
     parts = ", ".join(html.escape(item) for item in card.part_of_speech)
-    usage = "\n".join(f"• {html.escape(item)}" for item in card.usage_notes)
-    collocations = "、".join(html.escape(item) for item in card.collocations)
-    examples = "\n".join(
-        f"{index}. {html.escape(item.english)}\n   {html.escape(item.chinese)}"
+    usage = "\n".join(html.escape(item) for item in card.usage_notes)
+    collocations = "\n".join(html.escape(item) for item in card.collocations)
+    examples = "\n\n".join(
+        f"{index}. {html.escape(item.english)}\n{html.escape(item.chinese)}"
         for index, item in enumerate(card.examples, start=1)
     )
-    related = "\n".join(
-        f"• <b>{html.escape(item.word)}</b>：{html.escape(item.meaning_zh)}\n"
-        f"  {html.escape(item.connection)}\n"
-        f"  <i>{html.escape(item.example.english)}</i>"
+    related = "\n\n".join(
+        f"<b>{html.escape(item.word)}</b> {_phonetic(item.kk_phonetic)}\n"
+        f"{html.escape(item.meaning_zh)} · {html.escape(item.connection)}\n"
+        f"<i>{html.escape(item.example.english)}</i>"
         for item in card.related_words
     )
     collocation_block = f"\n\n<b>常見搭配</b>\n{collocations}" if collocations else ""
     return (
-        f"<b>📘 {html.escape(card.word)}</b>  <i>{parts}</i>\n"
-        f"{meanings}\n\n"
+        f"<b>{html.escape(card.word)}</b>\n"
+        f"{_phonetic(card.kk_phonetic)} · <i>{parts}</i>\n\n"
+        f"<b>中文釋義</b>\n{meanings}\n\n"
         f"<b>用法</b>\n{usage}{collocation_block}\n\n"
         f"<b>例句</b>\n{examples}\n\n"
         f"<b>相關單字</b>\n{related}"
@@ -67,10 +73,11 @@ def render_daily_review(words: Sequence[StoredWord], date: str) -> list[str]:
     lines = []
     for index, item in enumerate(words, start=1):
         meaning = "；".join(html.escape(value) for value in item.meanings_zh)
+        phonetic = f" {_phonetic(item.kk_phonetic)}" if item.kk_phonetic else ""
         example = ""
         if item.examples:
             example = f"\n<i>{html.escape(item.examples[0].english)}</i>"
-        lines.append(f"<b>{index}. {html.escape(item.word)}</b> — {meaning}{example}")
+        lines.append(f"<b>{index}. {html.escape(item.word)}</b>{phonetic}\n{meaning}{example}")
 
     # Telegram messages have a 4096-character ceiling. Chunk well below it.
     messages: list[str] = []
