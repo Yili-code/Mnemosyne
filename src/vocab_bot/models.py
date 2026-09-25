@@ -15,6 +15,7 @@ class RelatedWord(BaseModel):
     kk_phonetic: str = Field(
         default="", max_length=80, description="KK phonetic symbols without brackets"
     )
+    part_of_speech: list[str] = Field(default_factory=list, max_length=3)
     meaning_zh: str = Field(min_length=1, max_length=100)
     connection: str = Field(min_length=2, max_length=160)
     example: Example

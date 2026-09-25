@@ -53,6 +53,7 @@ def card_to_words(card: VocabularyCard) -> list[StoredWord]:
         StoredWord(
             word=item.word,
             kk_phonetic=item.kk_phonetic,
+            part_of_speech=item.part_of_speech,
             meanings_zh=[item.meaning_zh],
             usage_notes=[item.connection],
             examples=[item.example],

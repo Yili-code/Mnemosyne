@@ -20,6 +20,7 @@ def make_card() -> VocabularyCard:
             RelatedWord(
                 word=word,
                 kk_phonetic="rɪˈleɪtɪd",
+                part_of_speech=["verb"],
                 meaning_zh=meaning,
                 connection="在相似情境中使用",
                 example=Example(english=f"We {word} resources.", chinese="我們善用資源。"),

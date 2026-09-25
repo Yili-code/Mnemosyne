@@ -127,6 +127,22 @@ def test_non_owner_message_is_ignored() -> None:
     assert not telegram.messages
 
 
+def test_words_command_lists_repository_without_calling_gemini() -> None:
+    service, repository, gemini, telegram = make_service()
+    repository.words = card_to_words(make_card())
+
+    service.handle_update(
+        {
+            "update_id": 102,
+            "message": {"chat": {"id": 123, "type": "private"}, "text": "/words"},
+        }
+    )
+
+    assert gemini.calls == 0
+    assert "已儲存單字" in telegram.messages[0][1]
+    assert "leverage" in telegram.messages[0][1]
+
+
 def test_scheduled_delivery_is_idempotent_for_the_day() -> None:
     service, repository, _, telegram = make_service()
     repository.words = card_to_words(make_card())

@@ -1,5 +1,5 @@
 from vocab_bot.repository import card_to_words
-from vocab_bot.telegram import render_card, render_daily_review
+from vocab_bot.telegram import render_card, render_daily_review, render_word_list
 
 from .test_repository import make_card
 
@@ -22,3 +22,14 @@ def test_daily_review_renders_all_selected_words() -> None:
     combined = "".join(messages)
     assert "leverage" in combined
     assert "utilize" in combined
+    assert "<i>verb</i> · 善用" in combined
+    assert "We can leverage this tool." not in combined
+
+
+def test_word_list_renders_all_words_without_examples() -> None:
+    messages = render_word_list(card_to_words(make_card()))
+    combined = "".join(messages)
+    assert "共 4 個" in combined
+    assert "leverage" in combined
+    assert "utilize" in combined
+    assert "We can leverage this tool." not in combined

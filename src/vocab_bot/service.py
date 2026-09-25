@@ -12,6 +12,7 @@ from vocab_bot.telegram import (
     TelegramClient,
     render_card,
     render_daily_review,
+    render_word_list,
 )
 from vocab_bot.word_rules import normalize_input
 
@@ -69,6 +70,10 @@ class VocabularyService:
         if stripped == "/stats":
             count = len(self.repository.list_words())
             self.telegram.send_message(chat_id, f"目前資料庫共有 <b>{count}</b> 個單字。")
+            return
+        if stripped == "/words":
+            for response in render_word_list(self.repository.list_words()):
+                self.telegram.send_message(chat_id, response)
             return
         if stripped == "/review":
             self.send_review(force=True)

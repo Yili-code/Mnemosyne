@@ -74,10 +74,31 @@ def render_daily_review(words: Sequence[StoredWord], date: str) -> list[str]:
     for index, item in enumerate(words, start=1):
         meaning = "；".join(html.escape(value) for value in item.meanings_zh)
         phonetic = f" {_phonetic(item.kk_phonetic)}" if item.kk_phonetic else ""
-        example = ""
-        if item.examples:
-            example = f"\n<i>{html.escape(item.examples[0].english)}</i>"
-        lines.append(f"<b>{index}. {html.escape(item.word)}</b>{phonetic}\n{meaning}{example}")
+        parts = ", ".join(html.escape(value) for value in item.part_of_speech)
+        parts = parts or "詞性未標註"
+        lines.append(
+            f"<b>{index}. {html.escape(item.word)}</b>{phonetic} · <i>{parts}</i> · {meaning}"
+        )
+
+    return _chunk_lines(header, lines)
+
+
+def render_word_list(words: Sequence[StoredWord]) -> list[str]:
+    ordered = sorted(words, key=lambda item: item.word)
+    header = f"<b>已儲存單字</b>\n共 {len(ordered)} 個"
+    lines = []
+    for index, item in enumerate(ordered, start=1):
+        meaning = "；".join(html.escape(value) for value in item.meanings_zh)
+        parts = ", ".join(html.escape(value) for value in item.part_of_speech)
+        parts = parts or "詞性未標註"
+        lines.append(f"<b>{index}. {html.escape(item.word)}</b> · <i>{parts}</i> · {meaning}")
+
+    if not lines:
+        return [f"{header}\n\n目前尚未儲存任何單字。"]
+    return _chunk_lines(header, lines)
+
+
+def _chunk_lines(header: str, lines: Sequence[str]) -> list[str]:
 
     # Telegram messages have a 4096-character ceiling. Chunk well below it.
     messages: list[str] = []
@@ -106,4 +127,5 @@ HELP_TEXT = """<b>Mnemosyne</b>
 指令：
 /help — 顯示說明
 /stats — 查看已收藏的單字數量
+/words — 列出所有已儲存單字
 /review — 立即產生一輪 weighted review"""

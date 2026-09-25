@@ -9,8 +9,8 @@ from vocab_bot.word_rules import filter_related
 
 SYSTEM_PROMPT = """You create precise vocabulary cards for a Taiwanese university student.
 Return Traditional Chinese explanations and natural English examples.
-Provide accurate KK phonetic symbols for the headword and every related word. Return the symbols
-without surrounding square brackets or slashes.
+Provide accurate KK phonetic symbols and parts of speech for the headword and every related word.
+Return the phonetic symbols without surrounding square brackets or slashes.
 
 Write like a concise human-edited dictionary. Do not use emojis, motivational filler, generic
 introductions, conclusions, or references to yourself as an AI. Keep each field direct and useful.
@@ -91,11 +91,11 @@ class GeminiClient:
         if card.word != word:
             raise GeminiError("Gemini returned a different headword", code="wrong_headword")
         if not card.kk_phonetic.strip() or any(
-            not item.kk_phonetic.strip() for item in card.related_words
+            not item.kk_phonetic.strip() or not item.part_of_speech for item in card.related_words
         ):
             raise GeminiError(
-                "Gemini omitted a KK phonetic transcription",
-                code="missing_kk_phonetic",
+                "Gemini omitted pronunciation or part of speech",
+                code="missing_learning_metadata",
             )
         filtered = filter_related(word, card.related_words)
         if len(filtered) < 3:
