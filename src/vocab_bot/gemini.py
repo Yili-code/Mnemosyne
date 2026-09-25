@@ -49,7 +49,10 @@ class GeminiClient:
             ],
             "generationConfig": {
                 "responseMimeType": "application/json",
-                "responseSchema": schema,
+                # Pydantic emits standard JSON Schema with $defs/$ref. Gemini's
+                # responseSchema accepts only its smaller OpenAPI-style subset,
+                # while responseJsonSchema accepts the complete document.
+                "responseJsonSchema": schema,
                 "temperature": 0.25,
                 "maxOutputTokens": 2500,
             },
