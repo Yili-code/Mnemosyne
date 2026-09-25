@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.pytest-tmp*/
+.pytest-status-*/
+.ruff_cache/
+*.pyc
+*.sqlite3
+coverage.xml
+.coverage

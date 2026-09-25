@@ -1,0 +1,13 @@
+.gcloudignore
+.git
+.gitignore
+.env
+.venv
+.pytest_cache
+.pytest-tmp*
+.pytest-status-*
+.ruff_cache
+__pycache__
+tests
+data
+*.sqlite3
