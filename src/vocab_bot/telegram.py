@@ -69,7 +69,7 @@ def render_card(card: VocabularyCard) -> str:
 
 
 def render_daily_review(words: Sequence[StoredWord], date: str) -> list[str]:
-    header = f"<b>Daily Review · {html.escape(date)}</b>\n今天複習 {len(words)} 個單字"
+    header = f"<b>Daily Review · {html.escape(date)}</b>"
     lines = []
     for index, item in enumerate(words, start=1):
         meaning = "；".join(html.escape(value) for value in item.meanings_zh)
@@ -115,14 +115,12 @@ def _chunk_lines(header: str, lines: Sequence[str]) -> list[str]:
 
 
 HELP_TEXT = """<b>Mnemosyne</b>
-
 直接傳送一個英文單字，我會回覆：
 • 中文意思與實際用法
 • 自然例句
 • 常見搭配
 • TOEIC、IELTS 或日常英文中實用的相關單字
-
-普通複數、時態與常規衍生詞不會列入相關單字。
+(普通複數、時態與常規衍生詞不會列入相關單字)
 
 指令：
 /help — 顯示說明
