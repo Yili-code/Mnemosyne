@@ -66,3 +66,12 @@ def daily_review(x_cron_secret: str | None = Header(default=None)) -> dict[str, 
         raise HTTPException(status_code=401, detail="Invalid cron secret")
     words = get_service().send_review()
     return {"ok": True, "words": words}
+
+
+@app.post("/tasks/retry-failed")
+def retry_failed(x_cron_secret: str | None = Header(default=None)) -> dict[str, object]:
+    settings = get_settings()
+    if not _matches(x_cron_secret, settings.cron_secret):
+        raise HTTPException(status_code=401, detail="Invalid cron secret")
+    result = get_service().retry_failed_word()
+    return {"ok": True, **result}

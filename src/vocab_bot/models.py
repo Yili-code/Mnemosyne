@@ -61,3 +61,13 @@ class DailyDelivery(BaseModel):
     date: str
     words: list[str]
     sent_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class PendingWord(BaseModel):
+    word: str
+    chat_id: int
+    attempt_count: int = Field(default=1, ge=1)
+    last_error_code: str = Field(max_length=80)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_attempted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    next_attempt_at: datetime

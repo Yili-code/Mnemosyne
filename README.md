@@ -68,6 +68,16 @@ interface 的兩個實作，讓測試不需要連線雲端，同時避免把 Clo
 
 Bot 只處理 `TELEGRAM_OWNER_CHAT_ID` 對應的私人聊天室。
 
+## 自動重試
+
+Gemini 的 timeout、quota、服務暫時不可用或輸出未通過 schema／詞形規則時，系統不會丟失查詢。
+失敗單字會保存到 repository 的 `pending_words` queue，依序在 15 分鐘、1 小時、6 小時後重試，
+之後每天重試一次直到成功。成功後會寫入正式單字庫、移除 queue item，並主動把學習卡傳回
+Telegram。
+
+Cloud Run 不會在沒有 request 時自行執行背景 timer，因此 production 必須由 Cloud Scheduler 每
+10 分鐘呼叫 `/tasks/retry-failed`。每次只處理一個到期項目，控制 Gemini 用量並避免 request timeout。
+
 ## 本機執行
 
 需求：Python 3.11+。

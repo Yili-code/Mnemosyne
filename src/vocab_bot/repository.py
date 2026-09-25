@@ -5,13 +5,13 @@ import math
 import random
 import sqlite3
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
 from google.cloud import firestore
 
-from vocab_bot.models import DailyDelivery, StoredWord, VocabularyCard
+from vocab_bot.models import DailyDelivery, PendingWord, StoredWord, VocabularyCard
 
 
 class Repository(Protocol):
@@ -26,6 +26,14 @@ class Repository(Protocol):
     def get_delivery(self, date: str) -> DailyDelivery | None: ...
 
     def save_delivery(self, delivery: DailyDelivery) -> None: ...
+
+    def enqueue_retry(self, pending: PendingWord) -> None: ...
+
+    def claim_due_retry(self, now: datetime) -> PendingWord | None: ...
+
+    def reschedule_retry(self, pending: PendingWord) -> None: ...
+
+    def delete_retry(self, word: str) -> None: ...
 
 
 def card_to_words(card: VocabularyCard) -> list[StoredWord]:
@@ -101,6 +109,10 @@ class SQLiteRepository:
                 date TEXT PRIMARY KEY,
                 payload TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS pending_words (
+                word TEXT PRIMARY KEY,
+                payload TEXT NOT NULL
+            );
             """
         )
 
@@ -171,6 +183,51 @@ class SQLiteRepository:
                 (delivery.date, delivery.model_dump_json()),
             )
 
+    def enqueue_retry(self, pending: PendingWord) -> None:
+        row = self.connection.execute(
+            "SELECT payload FROM pending_words WHERE word = ?", (pending.word,)
+        ).fetchone()
+        if row:
+            existing = PendingWord.model_validate_json(row[0])
+            pending.created_at = existing.created_at
+            pending.attempt_count = max(existing.attempt_count, pending.attempt_count)
+        with self.connection:
+            self.connection.execute(
+                "INSERT OR REPLACE INTO pending_words(word, payload) VALUES (?, ?)",
+                (pending.word, pending.model_dump_json()),
+            )
+
+    def claim_due_retry(self, now: datetime) -> PendingWord | None:
+        with self.connection:
+            rows = self.connection.execute("SELECT payload FROM pending_words").fetchall()
+            pending = sorted(
+                (
+                    PendingWord.model_validate_json(row[0])
+                    for row in rows
+                    if PendingWord.model_validate_json(row[0]).next_attempt_at <= now
+                ),
+                key=lambda item: item.next_attempt_at,
+            )
+            if not pending:
+                return None
+            claimed = pending[0].model_copy(update={"next_attempt_at": now + timedelta(minutes=5)})
+            self.connection.execute(
+                "UPDATE pending_words SET payload = ? WHERE word = ?",
+                (claimed.model_dump_json(), claimed.word),
+            )
+            return claimed
+
+    def reschedule_retry(self, pending: PendingWord) -> None:
+        with self.connection:
+            self.connection.execute(
+                "INSERT OR REPLACE INTO pending_words(word, payload) VALUES (?, ?)",
+                (pending.word, pending.model_dump_json()),
+            )
+
+    def delete_retry(self, word: str) -> None:
+        with self.connection:
+            self.connection.execute("DELETE FROM pending_words WHERE word = ?", (word,))
+
 
 class FirestoreRepository:
     def __init__(self, project: str | None = None) -> None:
@@ -227,6 +284,51 @@ class FirestoreRepository:
         self.client.collection("daily_deliveries").document(delivery.date).set(
             delivery.model_dump(mode="json")
         )
+
+    def enqueue_retry(self, pending: PendingWord) -> None:
+        ref = self.client.collection("pending_words").document(pending.word)
+        snapshot = ref.get()
+        if snapshot.exists:
+            existing = PendingWord.model_validate(snapshot.to_dict())
+            pending.created_at = existing.created_at
+            pending.attempt_count = max(existing.attempt_count, pending.attempt_count)
+        ref.set(pending.model_dump(mode="json"))
+
+    def claim_due_retry(self, now: datetime) -> PendingWord | None:
+        query = (
+            self.client.collection("pending_words")
+            .where(filter=firestore.FieldFilter("next_attempt_at", "<=", now.isoformat()))
+            .order_by("next_attempt_at")
+            .limit(5)
+        )
+        for candidate in query.stream():
+            ref = candidate.reference
+            transaction = self.client.transaction()
+
+            @firestore.transactional
+            def claim(current_transaction, retry_ref=ref):
+                snapshot = retry_ref.get(transaction=current_transaction)
+                if not snapshot.exists:
+                    return None
+                pending = PendingWord.model_validate(snapshot.to_dict())
+                if pending.next_attempt_at > now:
+                    return None
+                claimed = pending.model_copy(update={"next_attempt_at": now + timedelta(minutes=5)})
+                current_transaction.set(retry_ref, claimed.model_dump(mode="json"))
+                return claimed
+
+            claimed = claim(transaction)
+            if claimed is not None:
+                return claimed
+        return None
+
+    def reschedule_retry(self, pending: PendingWord) -> None:
+        self.client.collection("pending_words").document(pending.word).set(
+            pending.model_dump(mode="json")
+        )
+
+    def delete_retry(self, word: str) -> None:
+        self.client.collection("pending_words").document(word).delete()
 
 
 def dump_words(words: Sequence[StoredWord]) -> str:

@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from random import Random
 
-from vocab_bot.models import Example, RelatedWord, StoredWord, VocabularyCard
+from vocab_bot.models import Example, PendingWord, RelatedWord, StoredWord, VocabularyCard
 from vocab_bot.repository import SQLiteRepository, weighted_sample
 
 
@@ -61,3 +61,24 @@ def test_weighted_review_favors_new_and_overdue_words() -> None:
         chosen = weighted_sample([new, familiar], 1, now=now, rng=rng)[0]
         counts[chosen.word] += 1
     assert counts["new"] > counts["familiar"] * 2
+
+
+def test_sqlite_retry_queue_persists_claims_and_completion(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "words.sqlite3")
+    now = datetime.now(UTC)
+    repository.enqueue_retry(
+        PendingWord(
+            word="protestation",
+            chat_id=123,
+            last_error_code="invalid_response",
+            next_attempt_at=now,
+        )
+    )
+
+    claimed = repository.claim_due_retry(now)
+
+    assert claimed is not None
+    assert claimed.word == "protestation"
+    assert repository.claim_due_retry(now) is None
+    repository.delete_retry("protestation")
+    assert repository.claim_due_retry(now + timedelta(days=1)) is None

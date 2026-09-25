@@ -127,14 +127,29 @@ Console 建立 HTTP job：
 建立後按 **Force run**。第一次 live test 應確認 Telegram 收到訊息，以及 Firestore 出現
 `daily_deliveries` 文件。只看到 Scheduler 顯示 success，不能單獨證明 Telegram 收到訊息。
 
-## 7. 成本保護
+## 7. 建立失敗單字自動重試排程
+
+Cloud Run scale-to-zero 後沒有常駐 process，因此不能靠 Python `sleep` 或背景 thread 準時重試。
+建立第二個 Cloud Scheduler HTTP job，每 10 分鐘喚醒一次 retry endpoint：
+
+- Name：`mnemosyne-retry-failed`
+- Method：`POST`
+- URL：`<SERVICE_URL>/tasks/retry-failed`
+- Header：`X-Cron-Secret: <你的 cron secret>`
+- Timezone：`Asia/Taipei`
+- Schedule：`*/10 * * * *`
+
+每次 invocation 最多處理一個到期單字。退避順序是 15 分鐘、1 小時、6 小時，之後每天一次；
+成功後 queue item 會刪除並透過 Telegram 傳回卡片。
+
+## 8. 成本保護
 
 - Cloud Run 保持 `min-instances=0`、`max-instances=1`。
 - 建立 billing budget alert。注意：budget alert 是通知，不是自動停機上限。
 - 在 Gemini API project 設定 quota；個人 bot 不需要高 RPM。
 - 定期查看 Cloud Run requests、Firestore reads/writes 與 Gemini usage。
 
-## 8. Production checklist
+## 9. Production checklist
 
 - `/health` 成功
 - `/help` 只在你的 private chat 回覆
@@ -143,9 +158,10 @@ Console 建立 HTTP job：
 - 同一 Telegram update retry 不會重複處理
 - Force run 收到 daily review
 - 同一天正常 scheduler retry 不會重複發送
+- Gemini 失敗時 Firestore 出現 `pending_words`，retry job 成功後該文件消失
 - Cloud Run logs 沒有出現 token 或 API key
 
-## 9. 如何教會另一個人，而不是替他部署
+## 10. 如何教會另一個人，而不是替他部署
 
 用「Explain → Demonstrate → Teach back」三輪：
 

@@ -23,7 +23,9 @@ lowercase and exactly 5 related words when possible."""
 
 
 class GeminiError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, code: str = "unknown") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class GeminiClient:
@@ -63,12 +65,27 @@ class GeminiClient:
             body = response.json()
             text = body["candidates"][0]["content"]["parts"][0]["text"]
             card = VocabularyCard.model_validate(json.loads(text))
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-            raise GeminiError("Gemini could not create a valid vocabulary card") from exc
+        except httpx.TimeoutException as exc:
+            raise GeminiError("Gemini request timed out", code="timeout") from exc
+        except httpx.HTTPStatusError as exc:
+            raise GeminiError(
+                "Gemini returned an HTTP error",
+                code=f"http_{exc.response.status_code}",
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise GeminiError("Gemini transport failed", code="transport") from exc
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise GeminiError(
+                "Gemini could not create a valid vocabulary card",
+                code="invalid_response",
+            ) from exc
 
         if card.word != word:
-            raise GeminiError("Gemini returned a different headword")
+            raise GeminiError("Gemini returned a different headword", code="wrong_headword")
         filtered = filter_related(word, card.related_words)
         if len(filtered) < 3:
-            raise GeminiError("Gemini returned too few valid independent related words")
+            raise GeminiError(
+                "Gemini returned too few valid independent related words",
+                code="too_few_related_words",
+            )
         return card.model_copy(update={"related_words": filtered})
