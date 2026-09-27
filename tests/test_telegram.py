@@ -19,11 +19,12 @@ def test_render_card_has_learning_sections_but_no_exam_labels() -> None:
 
 def test_review_prompt_has_grade_buttons_but_no_example() -> None:
     word = card_to_words(make_card())[0]
-    rendered = render_review_prompt(word, index=1, total=4, date="2026-09-24")
+    rendered = render_review_prompt(word)
     keyboard = review_keyboard(word.word)
-    assert "leverage" in rendered
-    assert "<i>verb</i> · 善用" in rendered
+    assert rendered == "<b>leverage</b> [ˈlɛvərɪdʒ]\n<i>verb</i> · 善用"
     assert "We can leverage this tool." not in rendered
+    assert "Daily Review" not in rendered
+    assert "你記得" not in rendered
     assert [button["text"] for button in keyboard["inline_keyboard"][0]] == [
         "Again",
         "Hard",

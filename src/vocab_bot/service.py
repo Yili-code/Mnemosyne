@@ -211,15 +211,10 @@ class VocabularyService:
             )
             return []
 
-        for index, item in enumerate(chosen, start=1):
+        for item in chosen:
             self.telegram.send_message(
                 self.owner_chat_id,
-                render_review_prompt(
-                    item,
-                    index=index,
-                    total=len(chosen),
-                    date=local_date,
-                ),
+                render_review_prompt(item),
                 reply_markup=review_keyboard(item.word),
             )
 

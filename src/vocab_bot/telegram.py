@@ -102,18 +102,12 @@ def render_card(card: VocabularyCard) -> str:
     )
 
 
-def render_review_prompt(item: StoredWord, *, index: int, total: int, date: str) -> str:
+def render_review_prompt(item: StoredWord) -> str:
     meaning = "；".join(html.escape(value) for value in item.meanings_zh)
     phonetic = f" {_phonetic(item.kk_phonetic)}" if item.kk_phonetic else ""
     parts = ", ".join(html.escape(value) for value in item.part_of_speech)
     parts = parts or "詞性未標註"
-    return (
-        f"<b>Daily Review · {html.escape(date)}</b>\n"
-        f"{index} / {total}\n\n"
-        f"<b>{html.escape(item.word)}</b>{phonetic}\n"
-        f"<i>{parts}</i> · {meaning}\n\n"
-        "你記得這個單字嗎？"
-    )
+    return f"<b>{html.escape(item.word)}</b>{phonetic}\n<i>{parts}</i> · {meaning}"
 
 
 def review_keyboard(word: str) -> dict[str, list[list[dict[str, str]]]]:
