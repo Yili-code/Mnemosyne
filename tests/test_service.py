@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from vocab_bot.gemini import GeminiError
-from vocab_bot.models import DailyDelivery, PendingWord, StoredWord
+from vocab_bot.models import DailyDelivery, PendingWord, ReviewTaskPayload, StoredWord
 from vocab_bot.repository import card_to_words
 from vocab_bot.service import VocabularyService
 from vocab_bot.spaced_repetition import ReviewGrade, schedule_review, select_due_words
@@ -89,6 +89,14 @@ class FakeTelegram:
         self.removed_keyboards.append((chat_id, message_id))
 
 
+class FakeReviewTaskQueue:
+    def __init__(self) -> None:
+        self.tasks: list[tuple[ReviewTaskPayload, str]] = []
+
+    def enqueue(self, payload: ReviewTaskPayload, *, delivery_key: str) -> None:
+        self.tasks.append((payload, delivery_key))
+
+
 class FailingGemini:
     def __init__(self, *, failures: int) -> None:
         self.failures = failures
@@ -170,6 +178,45 @@ def test_scheduled_delivery_is_idempotent_for_the_day() -> None:
     assert len(telegram.messages) == message_count
     assert telegram.messages[0][2] is not None
     assert repository.words[0].review_count == 0
+
+
+def test_review_queue_returns_without_sending_telegram_messages() -> None:
+    service, repository, _, telegram = make_service()
+    queue = FakeReviewTaskQueue()
+    service.review_task_queue = queue
+    repository.words = card_to_words(make_card())
+
+    selected = service.send_review(force=True, delivery_key="telegram-321")
+
+    assert len(selected) == 2
+    assert not telegram.messages
+    assert [task.item.word for task, _ in queue.tasks] == selected
+    assert {delivery_key for _, delivery_key in queue.tasks} == {"telegram-321"}
+
+
+def test_review_worker_sends_exactly_one_card() -> None:
+    service, repository, _, telegram = make_service()
+    item = card_to_words(make_card())[0]
+
+    service.send_review_card(ReviewTaskPayload(chat_id=123, item=item))
+
+    assert len(telegram.messages) == 1
+    assert telegram.messages[0][0] == 123
+    assert telegram.messages[0][2] is not None
+
+
+def test_review_worker_rejects_a_different_chat() -> None:
+    service, repository, _, telegram = make_service()
+    item = card_to_words(make_card())[0]
+
+    try:
+        service.send_review_card(ReviewTaskPayload(chat_id=999, item=item))
+    except ValueError as exc:
+        assert "owner" in str(exc)
+    else:
+        raise AssertionError("Expected a mismatched review task chat to be rejected")
+
+    assert not telegram.messages
 
 
 def test_review_callback_grades_word_once_and_removes_buttons() -> None:

@@ -34,6 +34,8 @@ A dictionary helps with recognition now; learning requires recall later. Mnemosy
   derivations that a prompt alone may still produce.
 - **Durable retry queue** — failed generations survive process restarts and retry with capped
   backoff instead of asking the user to resend a word.
+- **Backpressured review delivery** — Cloud Tasks turns each review card into an independently
+  retried job and rate-limits Telegram delivery outside the webhook request.
 - **Recall-graded scheduling** — Hard, Good, and Easy feedback controls each word's next
   review interval; merely displaying a word never counts as learning.
 - **Storage abstraction** — SQLite supports local development; Firestore supports stateless Cloud
@@ -103,11 +105,14 @@ Firestore ◄──────────── pending_words queue
    │ due vocabulary            │ every 10 minutes
    ▼                            │
 Telegram buttons ◄──── Cloud Scheduler
+       ▲
+       └──── Cloud Tasks (one review card per task)
 ```
 
 Cloud Run is ephemeral; Firestore owns durable state. Cloud Scheduler invokes protected endpoints
-for daily review and failed-word recovery. This separation keeps request handling stateless without
-pretending a container's local SQLite file is permanent cloud storage.
+for daily review and failed-word recovery. `/review` and the daily job enqueue one Cloud Task per
+card, so the original request returns before Telegram delivery begins. The queue limits dispatch
+rate and concurrency while retrying transient failures.
 
 ## Reliability model
 
@@ -115,6 +120,11 @@ Gemini failures are classified without logging credentials or full provider resp
 are persisted and retried after 15 minutes, 1 hour, 6 hours, and then once per day until successful.
 Firestore claims use a short transactional lease so overlapping scheduler invocations do not process
 the same item concurrently.
+
+Cloud Tasks provides at-least-once delivery. Deterministic task names suppress duplicate enqueue
+attempts, but Telegram does not accept an idempotency key; an ambiguous network failure after a
+successful Telegram send can therefore produce a rare duplicate card. The queue favors recovery
+over silently losing a review.
 
 The system combines three control layers:
 
@@ -172,6 +182,10 @@ Local development defaults to SQLite. Never commit the populated `.env` or local
 | `CRON_SECRET` | Protects scheduler endpoints |
 | `STORAGE_BACKEND` | `sqlite` locally or `firestore` in production |
 | `GOOGLE_CLOUD_PROJECT` | Firestore project when using the cloud backend |
+| `REVIEW_DELIVERY_MODE` | `direct` locally or `cloud_tasks` in production |
+| `CLOUD_RUN_SERVICE_URL` | Base URL used by queued review tasks |
+| `CLOUD_TASKS_QUEUE` | Review-delivery queue name |
+| `CLOUD_TASKS_LOCATION` | Queue region, normally the Cloud Run region |
 | `REVIEW_SIZE` | Number of words in a daily review |
 | `TIMEZONE` | Review timezone, defaulting to `Asia/Taipei` |
 
@@ -201,6 +215,7 @@ src/vocab_bot/
 ├── gemini.py       Structured generation and provider error boundaries
 ├── models.py       Validated domain models
 ├── repository.py   SQLite and Firestore implementations
+├── review_tasks.py Cloud Tasks adapter and task-level deduplication
 ├── service.py      Application workflow and retry policy
 ├── spaced_repetition.py  Recall grading and interval scheduling
 ├── telegram.py     Telegram client and HTML rendering

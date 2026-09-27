@@ -11,6 +11,7 @@ Google Cloud project、Telegram token 與 Gemini key 實際驗證。
 2. **Firestore 是永久記憶**：Cloud Run instance 可以消失，但單字、去重紀錄和複習狀態不能消失。
 3. **Secret Manager 是保險箱**：Telegram token、Gemini key 與 shared secrets 不放進 image 或 Git。
 4. **Webhook／Scheduler 是觸發器**：Telegram 觸發單字查詢，Scheduler 每天觸發複習。
+5. **Cloud Tasks 是傳送佇列**：一張複習卡是一個可重試工作，控制 Telegram 發送速度。
 
 本專案不是在部署時「搬移 SQLite 資料庫」。切換方式是把 `STORAGE_BACKEND` 從 `sqlite` 改成
 `firestore`。`src/vocab_bot/app.py` 會依該值建立 `FirestoreRepository`，Google client library 再以
@@ -49,7 +50,7 @@ Cloud Scheduler → protected endpoint → Cloud Run → Telegram
 ```powershell
 gcloud auth login
 gcloud config set project YOUR_PROJECT_ID
-gcloud services enable run.googleapis.com firestore.googleapis.com cloudscheduler.googleapis.com secretmanager.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+gcloud services enable run.googleapis.com firestore.googleapis.com cloudtasks.googleapis.com cloudscheduler.googleapis.com secretmanager.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
 ```
 
 在 Google Cloud Console 建立 Firestore **default database**，選 Native mode。建議 location 使用
@@ -79,6 +80,7 @@ Cloud Run 使用的 service account 必須具備：
 
 - Secret Manager Secret Accessor
 - Cloud Datastore User
+- Cloud Tasks Enqueuer
 
 這些權限分別允許它讀取秘密資料與操作 Firestore；不要直接給 Owner。
 
@@ -88,6 +90,34 @@ Cloud Run 使用的 service account 必須具備：
 
 ```powershell
 gcloud run deploy mnemosyne --source . --region asia-east1 --allow-unauthenticated --min-instances 0 --max-instances 1 --memory 512Mi --timeout 60 --set-env-vars "STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,TELEGRAM_OWNER_CHAT_ID=YOUR_CHAT_ID,GEMINI_MODEL=gemini-3.5-flash-lite,REVIEW_SIZE=20,TIMEZONE=Asia/Taipei" --set-secrets "TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,GEMINI_API_KEY=gemini-api-key:latest,CRON_SECRET=cron-secret:latest"
+```
+
+先建立 review queue。單一 concurrency 保留卡片順序，每秒兩張避免瞬間送出整批：
+
+```powershell
+gcloud tasks queues create mnemosyne-review --location asia-east1 --max-dispatches-per-second 2 --max-concurrent-dispatches 1 --max-attempts 5 --min-backoff 10s --max-backoff 300s
+```
+
+如果 queue 已存在，改用 `gcloud tasks queues update` 搭配相同設定。再把 Cloud Run runtime
+service account 加入 project 的 `roles/cloudtasks.enqueuer`。
+
+```powershell
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID --member="serviceAccount:YOUR_RUNTIME_SERVICE_ACCOUNT" --role="roles/cloudtasks.enqueuer"
+```
+
+部署時額外加入以下 environment variables：
+
+```text
+REVIEW_DELIVERY_MODE=cloud_tasks
+CLOUD_TASKS_QUEUE=mnemosyne-review
+CLOUD_TASKS_LOCATION=asia-east1
+CLOUD_RUN_SERVICE_URL=https://your-service-url.run.app
+```
+
+第一次部署取得 URL 後，用一次 service update 寫入這些值：
+
+```powershell
+gcloud run services update mnemosyne --region asia-east1 --update-env-vars "REVIEW_DELIVERY_MODE=cloud_tasks,CLOUD_TASKS_QUEUE=mnemosyne-review,CLOUD_TASKS_LOCATION=asia-east1,CLOUD_RUN_SERVICE_URL=https://your-service-url.run.app"
 ```
 
 `--allow-unauthenticated` 是因為 Telegram 必須能呼叫 webhook。這不等於沒有保護：應用程式仍會
@@ -167,6 +197,7 @@ Cloud Run、Firestore、Cloud Scheduler 與 Gemini 各自有不同的免費額�
 - Firestore 同時保存主單字與相關獨立單字
 - 同一 Telegram update retry 不會重複處理
 - Force run 收到 daily review，按下 Hard／Good／Easy 後按鈕消失並顯示下次間隔
+- `/review` webhook 在數秒內回應，Cloud Tasks 隨後逐張送出卡片
 - 同一天正常 scheduler retry 不會重複發送
 - Gemini 失敗時 Firestore 出現 `pending_words`，retry job 成功後該文件消失
 - Cloud Run logs 沒有出現 token 或 API key

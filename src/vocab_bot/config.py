@@ -25,6 +25,10 @@ class Settings:
     storage_backend: str
     sqlite_path: Path
     google_cloud_project: str | None
+    cloud_run_service_url: str | None
+    review_delivery_mode: str
+    cloud_tasks_queue: str
+    cloud_tasks_location: str
     review_size: int
     timezone: str
 
@@ -34,6 +38,15 @@ class Settings:
         backend = os.getenv("STORAGE_BACKEND", "sqlite").strip().lower()
         if backend not in {"sqlite", "firestore"}:
             raise RuntimeError("STORAGE_BACKEND must be 'sqlite' or 'firestore'")
+        delivery_mode = os.getenv("REVIEW_DELIVERY_MODE", "direct").strip().lower()
+        if delivery_mode not in {"direct", "cloud_tasks"}:
+            raise RuntimeError("REVIEW_DELIVERY_MODE must be 'direct' or 'cloud_tasks'")
+        project = os.getenv("GOOGLE_CLOUD_PROJECT") or None
+        service_url = os.getenv("CLOUD_RUN_SERVICE_URL", "").strip().rstrip("/") or None
+        if delivery_mode == "cloud_tasks" and (not project or not service_url):
+            raise RuntimeError(
+                "GOOGLE_CLOUD_PROJECT and CLOUD_RUN_SERVICE_URL are required for cloud_tasks"
+            )
         review_size = int(os.getenv("REVIEW_SIZE", "20"))
         if not 1 <= review_size <= 50:
             raise RuntimeError("REVIEW_SIZE must be between 1 and 50")
@@ -46,7 +59,11 @@ class Settings:
             cron_secret=_required("CRON_SECRET"),
             storage_backend=backend,
             sqlite_path=Path(os.getenv("SQLITE_PATH", "data/vocabulary.sqlite3")),
-            google_cloud_project=os.getenv("GOOGLE_CLOUD_PROJECT") or None,
+            google_cloud_project=project,
+            cloud_run_service_url=service_url,
+            review_delivery_mode=delivery_mode,
+            cloud_tasks_queue=os.getenv("CLOUD_TASKS_QUEUE", "mnemosyne-review").strip(),
+            cloud_tasks_location=os.getenv("CLOUD_TASKS_LOCATION", "asia-east1").strip(),
             review_size=review_size,
             timezone=os.getenv("TIMEZONE", "Asia/Taipei").strip(),
         )

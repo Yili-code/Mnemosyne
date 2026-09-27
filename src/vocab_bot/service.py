@@ -5,8 +5,9 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from vocab_bot.gemini import GeminiClient, GeminiError
-from vocab_bot.models import DailyDelivery, PendingWord
+from vocab_bot.models import DailyDelivery, PendingWord, ReviewTaskPayload
 from vocab_bot.repository import Repository
+from vocab_bot.review_tasks import ReviewTaskQueue
 from vocab_bot.spaced_repetition import (
     GRADE_LABELS,
     decode_review_callback,
@@ -46,6 +47,7 @@ class VocabularyService:
         owner_chat_id: int,
         review_size: int,
         timezone: str,
+        review_task_queue: ReviewTaskQueue | None = None,
     ) -> None:
         self.repository = repository
         self.gemini = gemini
@@ -53,6 +55,7 @@ class VocabularyService:
         self.owner_chat_id = owner_chat_id
         self.review_size = review_size
         self.timezone = ZoneInfo(timezone)
+        self.review_task_queue = review_task_queue
 
     def handle_update(self, update: dict) -> None:
         update_id = update.get("update_id")
@@ -87,7 +90,7 @@ class VocabularyService:
                 self.telegram.send_message(chat_id, response)
             return
         if stripped == "/review":
-            self.send_review(force=True)
+            self.send_review(force=True, delivery_key=f"telegram-{update_id}")
             return
 
         word = normalize_input(stripped)
@@ -196,7 +199,12 @@ class VocabularyService:
         self.telegram.send_message(pending.chat_id, render_card(card))
         return {"processed": 1, "succeeded": 1, "failed": 0}
 
-    def send_review(self, *, force: bool = False) -> list[str]:
+    def send_review(
+        self,
+        *,
+        force: bool = False,
+        delivery_key: str | None = None,
+    ) -> list[str]:
         now = datetime.now(UTC)
         local_date = now.astimezone(self.timezone).date().isoformat()
         previous = self.repository.get_delivery(local_date)
@@ -211,14 +219,26 @@ class VocabularyService:
             )
             return []
 
+        batch_key = delivery_key or f"daily-{local_date}"
         for item in chosen:
-            self.telegram.send_message(
-                self.owner_chat_id,
-                render_review_prompt(item),
-                reply_markup=review_keyboard(item.word),
-            )
+            if self.review_task_queue is None:
+                self.send_review_card(ReviewTaskPayload(chat_id=self.owner_chat_id, item=item))
+            else:
+                self.review_task_queue.enqueue(
+                    ReviewTaskPayload(chat_id=self.owner_chat_id, item=item),
+                    delivery_key=batch_key,
+                )
 
         selected_words = [item.word for item in chosen]
         if not force:
             self.repository.save_delivery(DailyDelivery(date=local_date, words=selected_words))
         return selected_words
+
+    def send_review_card(self, payload: ReviewTaskPayload) -> None:
+        if payload.chat_id != self.owner_chat_id:
+            raise ValueError("Review task chat does not match the configured owner")
+        self.telegram.send_message(
+            payload.chat_id,
+            render_review_prompt(payload.item),
+            reply_markup=review_keyboard(payload.item.word),
+        )

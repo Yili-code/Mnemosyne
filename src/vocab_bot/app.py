@@ -7,7 +7,9 @@ from fastapi import FastAPI, Header, HTTPException, Request
 
 from vocab_bot.config import Settings
 from vocab_bot.gemini import GeminiClient
+from vocab_bot.models import ReviewTaskPayload
 from vocab_bot.repository import FirestoreRepository, Repository, SQLiteRepository
+from vocab_bot.review_tasks import CloudTasksReviewQueue
 from vocab_bot.service import VocabularyService
 from vocab_bot.telegram import TelegramClient
 
@@ -27,6 +29,15 @@ def get_service() -> VocabularyService:
         repository = FirestoreRepository(settings.google_cloud_project)
     else:
         repository = SQLiteRepository(settings.sqlite_path)
+    review_task_queue = None
+    if settings.review_delivery_mode == "cloud_tasks":
+        review_task_queue = CloudTasksReviewQueue(
+            project=settings.google_cloud_project or "",
+            location=settings.cloud_tasks_location,
+            queue=settings.cloud_tasks_queue,
+            service_url=settings.cloud_run_service_url or "",
+            cron_secret=settings.cron_secret,
+        )
     return VocabularyService(
         repository=repository,
         gemini=GeminiClient(settings.gemini_api_key, settings.gemini_model),
@@ -34,6 +45,7 @@ def get_service() -> VocabularyService:
         owner_chat_id=settings.telegram_owner_chat_id,
         review_size=settings.review_size,
         timezone=settings.timezone,
+        review_task_queue=review_task_queue,
     )
 
 
@@ -75,3 +87,18 @@ def retry_failed(x_cron_secret: str | None = Header(default=None)) -> dict[str, 
         raise HTTPException(status_code=401, detail="Invalid cron secret")
     result = get_service().retry_failed_word()
     return {"ok": True, **result}
+
+
+@app.post("/tasks/send-review-card")
+def send_review_card(
+    payload: ReviewTaskPayload,
+    x_cron_secret: str | None = Header(default=None),
+) -> dict[str, bool]:
+    settings = get_settings()
+    if not _matches(x_cron_secret, settings.cron_secret):
+        raise HTTPException(status_code=401, detail="Invalid cron secret")
+    try:
+        get_service().send_review_card(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"ok": True}

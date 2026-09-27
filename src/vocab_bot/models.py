@@ -83,6 +83,11 @@ class DailyDelivery(BaseModel):
     sent_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class ReviewTaskPayload(BaseModel):
+    chat_id: int
+    item: StoredWord
+
+
 class PendingWord(BaseModel):
     word: str
     chat_id: int
