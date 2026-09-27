@@ -26,7 +26,6 @@ def test_review_prompt_has_grade_buttons_but_no_example() -> None:
     assert "Daily Review" not in rendered
     assert "你記得" not in rendered
     assert [button["text"] for button in keyboard["inline_keyboard"][0]] == [
-        "Again",
         "Hard",
         "Good",
         "Easy",

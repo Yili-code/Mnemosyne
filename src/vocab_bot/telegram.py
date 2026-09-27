@@ -115,10 +115,6 @@ def review_keyboard(word: str) -> dict[str, list[list[dict[str, str]]]]:
         "inline_keyboard": [
             [
                 {
-                    "text": "Again",
-                    "callback_data": encode_review_callback(word, ReviewGrade.AGAIN),
-                },
-                {
                     "text": "Hard",
                     "callback_data": encode_review_callback(word, ReviewGrade.HARD),
                 },

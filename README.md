@@ -34,7 +34,7 @@ A dictionary helps with recognition now; learning requires recall later. Mnemosy
   derivations that a prompt alone may still produce.
 - **Durable retry queue** — failed generations survive process restarts and retry with capped
   backoff instead of asking the user to resend a word.
-- **Recall-graded scheduling** — Again, Hard, Good, and Easy feedback controls each word's next
+- **Recall-graded scheduling** — Hard, Good, and Easy feedback controls each word's next
   review interval; merely displaying a word never counts as learning.
 - **Storage abstraction** — SQLite supports local development; Firestore supports stateless Cloud
   Run deployments through the same repository contract.
@@ -126,12 +126,11 @@ This boundary matters because prompting is probabilistic; product rules should b
 
 ## Spaced repetition
 
-Each review card has four recall grades. The scheduler changes the next interval only after the user
+Each review card has three visible recall grades. The scheduler changes the next interval only after the user
 answers; delivery alone does not increment `review_count`.
 
 | Grade | First interval | Later behavior |
 | --- | --- | --- |
-| Again | 10 minutes | Records a lapse and lowers the ease factor |
 | Hard | 1 day | Grows the previous interval slowly |
 | Good | 3 days | Multiplies the previous interval by the ease factor |
 | Easy | 7 days | Adds an ease bonus and grows the interval faster |
