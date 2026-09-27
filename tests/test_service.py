@@ -5,6 +5,7 @@ from vocab_bot.models import DailyDelivery, PendingWord, ReviewTaskPayload, Stor
 from vocab_bot.repository import card_to_words
 from vocab_bot.service import VocabularyService
 from vocab_bot.spaced_repetition import ReviewGrade, schedule_review, select_due_words
+from vocab_bot.telegram import TelegramError
 
 from .test_repository import make_card
 
@@ -95,6 +96,11 @@ class FakeReviewTaskQueue:
 
     def enqueue(self, payload: ReviewTaskPayload, *, delivery_key: str) -> None:
         self.tasks.append((payload, delivery_key))
+
+
+class CallbackAckFailingTelegram(FakeTelegram):
+    def answer_callback_query(self, callback_query_id: str, text: str) -> None:
+        raise TelegramError("Telegram answerCallbackQuery failed: query is too old")
 
 
 class FailingGemini:
@@ -249,7 +255,34 @@ def test_review_callback_grades_word_once_and_removes_buttons() -> None:
     assert reviewed.interval_days == 3
     assert "Good" in telegram.callback_answers[0][1]
     assert "已評分" in telegram.callback_answers[1][1]
-    assert telegram.removed_keyboards == [(123, 55)]
+    assert telegram.removed_keyboards == [(123, 55), (123, 55)]
+
+
+def test_expired_callback_ack_does_not_hide_a_successful_grade() -> None:
+    service, repository, _, _ = make_service()
+    telegram = CallbackAckFailingTelegram()
+    service.telegram = telegram
+    repository.words = card_to_words(make_card())
+
+    service.handle_update(
+        {
+            "update_id": 202,
+            "callback_query": {
+                "id": "expired-callback",
+                "from": {"id": 123},
+                "data": "review:e:leverage",
+                "message": {
+                    "message_id": 56,
+                    "chat": {"id": 123, "type": "private"},
+                },
+            },
+        }
+    )
+
+    reviewed = next(item for item in repository.words if item.word == "leverage")
+    assert reviewed.review_count == 1
+    assert reviewed.interval_days == 7
+    assert telegram.removed_keyboards == [(123, 56)]
 
 
 def test_gemini_failure_is_saved_for_automatic_retry() -> None:

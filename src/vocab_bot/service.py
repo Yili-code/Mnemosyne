@@ -16,6 +16,7 @@ from vocab_bot.spaced_repetition import (
 from vocab_bot.telegram import (
     HELP_TEXT,
     TelegramClient,
+    TelegramError,
     render_card,
     render_review_prompt,
     render_word_list,
@@ -153,14 +154,42 @@ class VocabularyService:
         word, grade = parsed
         reviewed = self.repository.grade_review(word, grade, datetime.now(UTC))
         if reviewed is None:
-            self.telegram.answer_callback_query(callback_id, "這個單字已評分或尚未到期。")
+            self._finish_review_callback(
+                callback_id=callback_id,
+                chat_id=chat_id,
+                message_id=message_id,
+                text="這個單字已評分或尚未到期。",
+            )
             return
 
         label = GRADE_LABELS[grade]
         interval = describe_interval(reviewed.interval_days)
-        self.telegram.answer_callback_query(callback_id, f"{label}：{interval}後可再次出現。")
+        self._finish_review_callback(
+            callback_id=callback_id,
+            chat_id=chat_id,
+            message_id=message_id,
+            text=f"{label}：{interval}後可再次出現。",
+        )
+
+    def _finish_review_callback(
+        self,
+        *,
+        callback_id: str,
+        chat_id: int,
+        message_id: object,
+        text: str,
+    ) -> None:
+        # These are two independent Telegram side effects. An expired callback query
+        # must not prevent the durable grade from being reflected in the message UI.
         if isinstance(message_id, int):
-            self.telegram.remove_inline_keyboard(chat_id, message_id)
+            try:
+                self.telegram.remove_inline_keyboard(chat_id, message_id)
+            except TelegramError as exc:
+                logger.warning("Review keyboard removal failed: %s", exc)
+        try:
+            self.telegram.answer_callback_query(callback_id, text)
+        except TelegramError as exc:
+            logger.warning("Review callback acknowledgement failed: %s", exc)
 
     def retry_failed_word(self, *, now: datetime | None = None) -> dict[str, int]:
         attempted_at = now or datetime.now(UTC)

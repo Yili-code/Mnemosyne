@@ -64,10 +64,13 @@ class TelegramClient:
                 json=payload,
                 timeout=self.timeout,
             )
-            response.raise_for_status()
             body = response.json()
-            if not isinstance(body, dict) or not body.get("ok"):
-                raise TelegramError(f"Telegram rejected {method}")
+            if response.is_error or not isinstance(body, dict) or not body.get("ok"):
+                description = body.get("description") if isinstance(body, dict) else None
+                detail = f": {description}" if isinstance(description, str) else ""
+                raise TelegramError(f"Telegram {method} failed{detail}")
+        except TelegramError:
+            raise
         except (httpx.HTTPError, ValueError):
             # Suppress the provider exception so credentials never enter application logs.
             raise TelegramError(f"Telegram {method} failed") from None
