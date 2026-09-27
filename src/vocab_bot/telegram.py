@@ -188,7 +188,6 @@ HELP_TEXT = """<b>Mnemosyne</b>
 
 指令：
 /help — 顯示說明
-/stats — 查看已收藏的單字數量
 /words — 列出所有已儲存單字
 /review — 複習目前到期的單字，並依記憶程度安排下次複習
 /clear — 經過確認後清空所有學習資料"""

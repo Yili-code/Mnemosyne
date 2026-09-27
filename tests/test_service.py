@@ -189,6 +189,23 @@ def test_words_command_lists_repository_without_calling_gemini() -> None:
     assert "leverage" in telegram.messages[0][1]
 
 
+def test_removed_stats_command_is_not_routed() -> None:
+    service, repository, gemini, telegram = make_service()
+    repository.words = card_to_words(make_card())
+
+    service.handle_update(
+        {
+            "update_id": 103,
+            "message": {"chat": {"id": 123, "type": "private"}, "text": "/stats"},
+        }
+    )
+
+    assert gemini.calls == 0
+    assert len(telegram.messages) == 1
+    assert "一次只傳送一個英文單字" in telegram.messages[0][1]
+    assert "資料庫共有" not in telegram.messages[0][1]
+
+
 def test_scheduled_delivery_is_idempotent_for_the_day() -> None:
     service, repository, _, telegram = make_service()
     repository.words = card_to_words(make_card())

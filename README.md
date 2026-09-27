@@ -82,7 +82,6 @@ The team conducted a thorough review.
 | `word` | Generate and save a vocabulary card |
 | `/review` | Review due words and grade recall without showing examples |
 | `/words` | List every stored word, part of speech, and Chinese meaning |
-| `/stats` | Show the number of stored words |
 | `/clear` | Permanently clear learning data after explicit confirmation |
 | `/help` | Show in-bot usage instructions |
 
