@@ -8,6 +8,7 @@ from vocab_bot.telegram import (
     clear_database_keyboard,
     render_card,
     render_review_prompt,
+    render_search_result,
     render_word_list,
     review_keyboard,
 )
@@ -59,6 +60,18 @@ def test_word_list_renders_all_words_without_examples() -> None:
     assert "leverage" in combined
     assert "utilize" in combined
     assert "We can leverage this tool." not in combined
+
+
+def test_search_result_renders_the_stored_content() -> None:
+    word = card_to_words(make_card())[0]
+
+    rendered = render_search_result(word)
+
+    assert "<b>leverage</b> [ˈlɛvərɪdʒ]" in rendered
+    assert "<b>中文釋義</b>\n善用" in rendered
+    assert "<b>用法</b>" in rendered
+    assert "<b>常見搭配</b>" in rendered
+    assert "We can leverage this tool." in rendered
 
 
 def test_telegram_error_suppresses_the_token_bearing_provider_exception(monkeypatch) -> None:

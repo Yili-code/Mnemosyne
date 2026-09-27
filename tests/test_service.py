@@ -189,6 +189,63 @@ def test_words_command_lists_repository_without_calling_gemini() -> None:
     assert "leverage" in telegram.messages[0][1]
 
 
+def test_search_returns_one_stored_word_without_writing_or_calling_gemini() -> None:
+    service, repository, gemini, telegram = make_service()
+    repository.words = card_to_words(make_card())
+
+    service.handle_update(
+        {
+            "update_id": 104,
+            "message": {
+                "chat": {"id": 123, "type": "private"},
+                "text": "/search Leverage",
+            },
+        }
+    )
+
+    assert gemini.calls == 0
+    assert repository.saved_cards == 0
+    assert len(repository.words) == 4
+    assert len(telegram.messages) == 1
+    assert "<b>leverage</b>" in telegram.messages[0][1]
+    assert "中文釋義" in telegram.messages[0][1]
+
+
+def test_search_missing_word_does_not_add_it() -> None:
+    service, repository, gemini, telegram = make_service()
+    repository.words = card_to_words(make_card())
+
+    service.handle_update(
+        {
+            "update_id": 105,
+            "message": {
+                "chat": {"id": 123, "type": "private"},
+                "text": "/search apple",
+            },
+        }
+    )
+
+    assert gemini.calls == 0
+    assert repository.saved_cards == 0
+    assert repository.get_word("apple") is None
+    assert "找不到 <b>apple</b>" in telegram.messages[0][1]
+
+
+def test_search_requires_exactly_one_valid_word() -> None:
+    service, repository, gemini, telegram = make_service()
+
+    service.handle_update(
+        {
+            "update_id": 106,
+            "message": {"chat": {"id": 123, "type": "private"}, "text": "/search"},
+        }
+    )
+
+    assert gemini.calls == 0
+    assert repository.saved_cards == 0
+    assert "/search apple" in telegram.messages[0][1]
+
+
 def test_removed_stats_command_is_not_routed() -> None:
     service, repository, gemini, telegram = make_service()
     repository.words = card_to_words(make_card())

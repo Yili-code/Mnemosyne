@@ -80,6 +80,7 @@ The team conducted a thorough review.
 | Command | Purpose |
 | --- | --- |
 | `word` | Generate and save a vocabulary card |
+| `/search apple` | Find one exact stored word without calling Gemini or writing data |
 | `/review` | Review due words and grade recall without showing examples |
 | `/words` | List every stored word, part of speech, and Chinese meaning |
 | `/clear` | Permanently clear learning data after explicit confirmation |

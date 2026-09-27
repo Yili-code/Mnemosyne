@@ -115,6 +115,30 @@ def render_review_prompt(item: StoredWord) -> str:
     return f"<b>{html.escape(item.word)}</b>{phonetic}\n<i>{parts}</i> · {meaning}"
 
 
+def render_search_result(item: StoredWord) -> str:
+    phonetic = f" {_phonetic(item.kk_phonetic)}" if item.kk_phonetic else ""
+    parts = ", ".join(html.escape(value) for value in item.part_of_speech)
+    parts = parts or "詞性未標註"
+    meanings = "；".join(html.escape(value) for value in item.meanings_zh)
+    sections = [
+        f"<b>{html.escape(item.word)}</b>{phonetic}\n<i>{parts}</i>",
+        f"<b>中文釋義</b>\n{meanings}",
+    ]
+    if item.usage_notes:
+        usage = "\n".join(html.escape(value) for value in item.usage_notes)
+        sections.append(f"<b>用法</b>\n{usage}")
+    if item.collocations:
+        collocations = "\n".join(html.escape(value) for value in item.collocations)
+        sections.append(f"<b>常見搭配</b>\n{collocations}")
+    if item.examples:
+        examples = "\n\n".join(
+            f"{index}. {html.escape(example.english)}\n{html.escape(example.chinese)}"
+            for index, example in enumerate(item.examples, start=1)
+        )
+        sections.append(f"<b>例句</b>\n{examples}")
+    return "\n\n".join(sections)
+
+
 def review_keyboard(word: str) -> dict[str, list[list[dict[str, str]]]]:
     return {
         "inline_keyboard": [
@@ -188,6 +212,7 @@ HELP_TEXT = """<b>Mnemosyne</b>
 
 指令：
 /help — 顯示說明
+/search apple — 搜尋已儲存單字，不新增資料
 /words — 列出所有已儲存單字
 /review — 複習目前到期的單字，並依記憶程度安排下次複習
 /clear — 經過確認後清空所有學習資料"""

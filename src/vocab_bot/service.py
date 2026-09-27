@@ -20,6 +20,7 @@ from vocab_bot.telegram import (
     clear_database_keyboard,
     render_card,
     render_review_prompt,
+    render_search_result,
     render_word_list,
     review_keyboard,
 )
@@ -82,6 +83,24 @@ class VocabularyService:
         stripped = text.strip()
         if stripped in {"/start", "/help"}:
             self.telegram.send_message(chat_id, HELP_TEXT)
+            return
+        if stripped == "/search" or stripped.startswith("/search "):
+            _, _, query = stripped.partition(" ")
+            word = normalize_input(query)
+            if word is None:
+                self.telegram.send_message(
+                    chat_id,
+                    "請輸入一個英文單字，例如：<code>/search apple</code>。",
+                )
+                return
+            stored = self.repository.get_word(word)
+            if stored is None:
+                self.telegram.send_message(
+                    chat_id,
+                    f"資料庫中找不到 <b>{word}</b>。此指令不會新增單字。",
+                )
+                return
+            self.telegram.send_message(chat_id, render_search_result(stored))
             return
         if stripped == "/words":
             for response in render_word_list(self.repository.list_words()):
