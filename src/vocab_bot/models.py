@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Example(BaseModel):
@@ -62,7 +62,19 @@ class StoredWord(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     review_count: int = 0
+    lapse_count: int = 0
+    interval_days: float = Field(default=0.0, ge=0.0, le=3650.0)
+    ease_factor: float = Field(default=2.5, ge=1.3, le=4.0)
     last_reviewed_at: datetime | None = None
+    due_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @model_validator(mode="before")
+    @classmethod
+    def backfill_due_at(cls, value):
+        if isinstance(value, dict) and not value.get("due_at"):
+            value = dict(value)
+            value["due_at"] = value.get("created_at") or datetime.now(UTC)
+        return value
 
 
 class DailyDelivery(BaseModel):

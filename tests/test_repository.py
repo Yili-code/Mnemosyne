@@ -1,9 +1,9 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from random import Random
 
 from vocab_bot.models import Example, PendingWord, RelatedWord, StoredWord, VocabularyCard
-from vocab_bot.repository import SQLiteRepository, weighted_sample
+from vocab_bot.repository import SQLiteRepository
+from vocab_bot.spaced_repetition import ReviewGrade
 
 
 def make_card() -> VocabularyCard:
@@ -49,21 +49,43 @@ def test_claim_update_is_idempotent(tmp_path: Path) -> None:
     assert repository.claim_update(42) is False
 
 
-def test_weighted_review_favors_new_and_overdue_words() -> None:
-    now = datetime.now(UTC)
-    new = StoredWord(word="new", meanings_zh=["新"])
-    familiar = StoredWord(
-        word="familiar",
-        meanings_zh=["熟悉"],
-        review_count=20,
-        last_reviewed_at=now - timedelta(hours=1),
+def test_sqlite_review_grade_is_atomic_and_cannot_be_repeated(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "words.sqlite3")
+    repository.save_card(make_card())
+    now = datetime.now(UTC) + timedelta(seconds=1)
+
+    reviewed = repository.grade_review("leverage", ReviewGrade.GOOD, now)
+    repeated = repository.grade_review("leverage", ReviewGrade.EASY, now)
+
+    assert reviewed is not None
+    assert reviewed.review_count == 1
+    assert reviewed.interval_days == 3
+    assert reviewed.due_at == now + timedelta(days=3)
+    assert repeated is None
+
+
+def test_saving_refreshed_card_preserves_review_schedule(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "words.sqlite3")
+    repository.save_card(make_card())
+    now = datetime.now(UTC) + timedelta(seconds=1)
+    reviewed = repository.grade_review("leverage", ReviewGrade.GOOD, now)
+    assert reviewed is not None
+
+    repository.save_card(make_card())
+    refreshed = next(item for item in repository.list_words() if item.word == "leverage")
+
+    assert refreshed.review_count == 1
+    assert refreshed.interval_days == 3
+    assert refreshed.due_at == now + timedelta(days=3)
+
+
+def test_old_word_without_due_at_becomes_due_from_created_at() -> None:
+    created_at = datetime(2026, 9, 1, tzinfo=UTC)
+    stored = StoredWord.model_validate(
+        {"word": "legacy", "meanings_zh": ["舊資料"], "created_at": created_at}
     )
-    counts = {"new": 0, "familiar": 0}
-    rng = Random(7)
-    for _ in range(500):
-        chosen = weighted_sample([new, familiar], 1, now=now, rng=rng)[0]
-        counts[chosen.word] += 1
-    assert counts["new"] > counts["familiar"] * 2
+
+    assert stored.due_at == created_at
 
 
 def test_sqlite_retry_queue_persists_claims_and_completion(tmp_path: Path) -> None:

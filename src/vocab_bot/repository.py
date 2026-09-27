@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
-import random
 import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -12,6 +10,7 @@ from typing import Protocol
 from google.cloud import firestore
 
 from vocab_bot.models import DailyDelivery, PendingWord, StoredWord, VocabularyCard
+from vocab_bot.spaced_repetition import ReviewGrade, is_due, schedule_review, select_due_words
 
 
 class Repository(Protocol):
@@ -21,7 +20,11 @@ class Repository(Protocol):
 
     def list_words(self) -> list[StoredWord]: ...
 
-    def mark_reviewed(self, words: Sequence[str], reviewed_at: datetime) -> None: ...
+    def list_due_words(self, now: datetime, limit: int) -> list[StoredWord]: ...
+
+    def grade_review(
+        self, word: str, grade: ReviewGrade, reviewed_at: datetime
+    ) -> StoredWord | None: ...
 
     def get_delivery(self, date: str) -> DailyDelivery | None: ...
 
@@ -67,30 +70,14 @@ def card_to_words(card: VocabularyCard) -> list[StoredWord]:
     return [main, *seeds]
 
 
-def review_weight(item: StoredWord, now: datetime) -> float:
-    if item.last_reviewed_at is None:
-        days = 30.0
-    else:
-        elapsed = now - item.last_reviewed_at
-        days = max(0.0, min(elapsed.total_seconds() / 86400, 30.0))
-    novelty = 5.0 / (1.0 + item.review_count)
-    spacing = 1.0 + days / 7.0
-    return max(0.1, novelty + spacing)
-
-
-def weighted_sample(
-    items: Sequence[StoredWord], size: int, *, now: datetime, rng: random.Random | None = None
-) -> list[StoredWord]:
-    """Weighted sample without replacement using exponential random keys."""
-    generator = rng or random.Random()
-    ranked = []
-    for item in items:
-        weight = review_weight(item, now)
-        draw = max(generator.random(), 1e-12)
-        key = -math.log(draw) / weight
-        ranked.append((key, item))
-    ranked.sort(key=lambda pair: pair[0])
-    return [item for _, item in ranked[:size]]
+def preserve_learning_state(incoming: StoredWord, existing: StoredWord) -> None:
+    incoming.created_at = existing.created_at
+    incoming.review_count = existing.review_count
+    incoming.lapse_count = existing.lapse_count
+    incoming.interval_days = existing.interval_days
+    incoming.ease_factor = existing.ease_factor
+    incoming.last_reviewed_at = existing.last_reviewed_at
+    incoming.due_at = existing.due_at
 
 
 class SQLiteRepository:
@@ -138,9 +125,7 @@ class SQLiteRepository:
                 ).fetchone()
                 if row:
                     existing = StoredWord.model_validate_json(row[0])
-                    incoming.created_at = existing.created_at
-                    incoming.review_count = existing.review_count
-                    incoming.last_reviewed_at = existing.last_reviewed_at
+                    preserve_learning_state(incoming, existing)
                     if not incoming.is_related_seed or existing.is_related_seed:
                         value = incoming
                     else:
@@ -156,22 +141,27 @@ class SQLiteRepository:
         rows = self.connection.execute("SELECT payload FROM words ORDER BY word").fetchall()
         return [StoredWord.model_validate_json(row[0]) for row in rows]
 
-    def mark_reviewed(self, words: Sequence[str], reviewed_at: datetime) -> None:
+    def list_due_words(self, now: datetime, limit: int) -> list[StoredWord]:
+        return select_due_words(self.list_words(), now=now, limit=limit)
+
+    def grade_review(
+        self, word: str, grade: ReviewGrade, reviewed_at: datetime
+    ) -> StoredWord | None:
         with self.connection:
-            for word in words:
-                row = self.connection.execute(
-                    "SELECT payload FROM words WHERE word = ?", (word,)
-                ).fetchone()
-                if not row:
-                    continue
-                item = StoredWord.model_validate_json(row[0])
-                item.review_count += 1
-                item.last_reviewed_at = reviewed_at
-                item.updated_at = reviewed_at
-                self.connection.execute(
-                    "UPDATE words SET payload = ? WHERE word = ?",
-                    (item.model_dump_json(), word),
-                )
+            row = self.connection.execute(
+                "SELECT payload FROM words WHERE word = ?", (word,)
+            ).fetchone()
+            if not row:
+                return None
+            item = StoredWord.model_validate_json(row[0])
+            if not is_due(item, reviewed_at):
+                return None
+            scheduled = schedule_review(item, grade, reviewed_at=reviewed_at)
+            self.connection.execute(
+                "UPDATE words SET payload = ? WHERE word = ?",
+                (scheduled.model_dump_json(), word),
+            )
+            return scheduled
 
     def get_delivery(self, date: str) -> DailyDelivery | None:
         row = self.connection.execute(
@@ -253,9 +243,7 @@ class FirestoreRepository:
             snapshot = ref.get()
             if snapshot.exists:
                 existing = StoredWord.model_validate(snapshot.to_dict())
-                incoming.created_at = existing.created_at
-                incoming.review_count = existing.review_count
-                incoming.last_reviewed_at = existing.last_reviewed_at
+                preserve_learning_state(incoming, existing)
                 if incoming.is_related_seed and not existing.is_related_seed:
                     continue
             batch.set(ref, incoming.model_dump(mode="json"))
@@ -265,19 +253,30 @@ class FirestoreRepository:
         documents = self.client.collection("words").stream()
         return [StoredWord.model_validate(doc.to_dict()) for doc in documents]
 
-    def mark_reviewed(self, words: Sequence[str], reviewed_at: datetime) -> None:
-        batch = self.client.batch()
-        for word in words:
-            ref = self.client.collection("words").document(word)
-            batch.update(
-                ref,
-                {
-                    "review_count": firestore.Increment(1),
-                    "last_reviewed_at": reviewed_at.isoformat(),
-                    "updated_at": reviewed_at.isoformat(),
-                },
-            )
-        batch.commit()
+    def list_due_words(self, now: datetime, limit: int) -> list[StoredWord]:
+        # Filtering in Python keeps older Firestore documents compatible because
+        # records created before due_at existed have no queryable due_at field.
+        return select_due_words(self.list_words(), now=now, limit=limit)
+
+    def grade_review(
+        self, word: str, grade: ReviewGrade, reviewed_at: datetime
+    ) -> StoredWord | None:
+        ref = self.client.collection("words").document(word)
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def grade_once(current_transaction):
+            snapshot = ref.get(transaction=current_transaction)
+            if not snapshot.exists:
+                return None
+            item = StoredWord.model_validate(snapshot.to_dict())
+            if not is_due(item, reviewed_at):
+                return None
+            scheduled = schedule_review(item, grade, reviewed_at=reviewed_at)
+            current_transaction.set(ref, scheduled.model_dump(mode="json"))
+            return scheduled
+
+        return grade_once(transaction)
 
     def get_delivery(self, date: str) -> DailyDelivery | None:
         snapshot = self.client.collection("daily_deliveries").document(date).get()

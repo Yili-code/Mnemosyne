@@ -4,6 +4,7 @@ from vocab_bot.gemini import GeminiError
 from vocab_bot.models import DailyDelivery, PendingWord, StoredWord
 from vocab_bot.repository import card_to_words
 from vocab_bot.service import VocabularyService
+from vocab_bot.spaced_repetition import ReviewGrade, schedule_review, select_due_words
 
 from .test_repository import make_card
 
@@ -29,11 +30,18 @@ class FakeRepository:
     def list_words(self) -> list[StoredWord]:
         return self.words
 
-    def mark_reviewed(self, words, reviewed_at: datetime) -> None:
-        for item in self.words:
-            if item.word in words:
-                item.review_count += 1
-                item.last_reviewed_at = reviewed_at
+    def list_due_words(self, now: datetime, limit: int) -> list[StoredWord]:
+        return select_due_words(self.words, now=now, limit=limit)
+
+    def grade_review(
+        self, word: str, grade: ReviewGrade, reviewed_at: datetime
+    ) -> StoredWord | None:
+        for index, item in enumerate(self.words):
+            if item.word == word and item.due_at <= reviewed_at:
+                reviewed = schedule_review(item, grade, reviewed_at=reviewed_at)
+                self.words[index] = reviewed
+                return reviewed
+        return None
 
     def get_delivery(self, date: str) -> DailyDelivery | None:
         return self.deliveries.get(date)
@@ -67,10 +75,18 @@ class FakeGemini:
 
 class FakeTelegram:
     def __init__(self) -> None:
-        self.messages: list[tuple[int, str]] = []
+        self.messages: list[tuple[int, str, dict | None]] = []
+        self.callback_answers: list[tuple[str, str]] = []
+        self.removed_keyboards: list[tuple[int, int]] = []
 
-    def send_message(self, chat_id: int, text: str) -> None:
-        self.messages.append((chat_id, text))
+    def send_message(self, chat_id: int, text: str, *, reply_markup: dict | None = None) -> None:
+        self.messages.append((chat_id, text, reply_markup))
+
+    def answer_callback_query(self, callback_query_id: str, text: str) -> None:
+        self.callback_answers.append((callback_query_id, text))
+
+    def remove_inline_keyboard(self, chat_id: int, message_id: int) -> None:
+        self.removed_keyboards.append((chat_id, message_id))
 
 
 class FailingGemini:
@@ -152,6 +168,41 @@ def test_scheduled_delivery_is_idempotent_for_the_day() -> None:
     assert first == second
     assert len(first) == 2
     assert len(telegram.messages) == message_count
+    assert telegram.messages[0][2] is not None
+    assert repository.words[0].review_count == 0
+
+
+def test_review_callback_grades_word_once_and_removes_buttons() -> None:
+    service, repository, _, telegram = make_service()
+    repository.words = card_to_words(make_card())
+    update = {
+        "update_id": 200,
+        "callback_query": {
+            "id": "callback-1",
+            "from": {"id": 123},
+            "data": "review:g:leverage",
+            "message": {
+                "message_id": 55,
+                "chat": {"id": 123, "type": "private"},
+            },
+        },
+    }
+
+    service.handle_update(update)
+    service.handle_update(
+        {
+            **update,
+            "update_id": 201,
+            "callback_query": {**update["callback_query"], "id": "callback-2"},
+        }
+    )
+
+    reviewed = next(item for item in repository.words if item.word == "leverage")
+    assert reviewed.review_count == 1
+    assert reviewed.interval_days == 3
+    assert "Good" in telegram.callback_answers[0][1]
+    assert "已評分" in telegram.callback_answers[1][1]
+    assert telegram.removed_keyboards == [(123, 55)]
 
 
 def test_gemini_failure_is_saved_for_automatic_retry() -> None:

@@ -6,13 +6,19 @@ from zoneinfo import ZoneInfo
 
 from vocab_bot.gemini import GeminiClient, GeminiError
 from vocab_bot.models import DailyDelivery, PendingWord
-from vocab_bot.repository import Repository, weighted_sample
+from vocab_bot.repository import Repository
+from vocab_bot.spaced_repetition import (
+    GRADE_LABELS,
+    decode_review_callback,
+    describe_interval,
+)
 from vocab_bot.telegram import (
     HELP_TEXT,
     TelegramClient,
     render_card,
-    render_daily_review,
+    render_review_prompt,
     render_word_list,
+    review_keyboard,
 )
 from vocab_bot.word_rules import normalize_input
 
@@ -50,6 +56,11 @@ class VocabularyService:
 
     def handle_update(self, update: dict) -> None:
         update_id = update.get("update_id")
+        callback = update.get("callback_query")
+        if isinstance(update_id, int) and isinstance(callback, dict):
+            self._handle_review_callback(callback)
+            return
+
         message = update.get("message") or {}
         chat = message.get("chat") or {}
         chat_id = chat.get("id")
@@ -113,6 +124,41 @@ class VocabularyService:
         self.repository.delete_retry(word)
         self.telegram.send_message(chat_id, render_card(card))
 
+    def _handle_review_callback(self, callback: dict) -> None:
+        callback_id = callback.get("id")
+        sender = callback.get("from") or {}
+        message = callback.get("message") or {}
+        chat = message.get("chat") or {}
+        data = callback.get("data")
+        chat_id = chat.get("id")
+        message_id = message.get("message_id")
+
+        if (
+            not isinstance(callback_id, str)
+            or sender.get("id") != self.owner_chat_id
+            or chat_id != self.owner_chat_id
+            or chat.get("type") != "private"
+            or not isinstance(data, str)
+        ):
+            return
+
+        parsed = decode_review_callback(data)
+        if parsed is None:
+            self.telegram.answer_callback_query(callback_id, "無效的複習選項。")
+            return
+
+        word, grade = parsed
+        reviewed = self.repository.grade_review(word, grade, datetime.now(UTC))
+        if reviewed is None:
+            self.telegram.answer_callback_query(callback_id, "這個單字已評分或尚未到期。")
+            return
+
+        label = GRADE_LABELS[grade]
+        interval = describe_interval(reviewed.interval_days)
+        self.telegram.answer_callback_query(callback_id, f"{label}：{interval}後可再次出現。")
+        if isinstance(message_id, int):
+            self.telegram.remove_inline_keyboard(chat_id, message_id)
+
     def retry_failed_word(self, *, now: datetime | None = None) -> dict[str, int]:
         attempted_at = now or datetime.now(UTC)
         pending = self.repository.claim_due_retry(attempted_at)
@@ -157,20 +203,27 @@ class VocabularyService:
         if previous and not force:
             return previous.words
 
-        all_words = self.repository.list_words()
-        chosen = weighted_sample(all_words, min(self.review_size, len(all_words)), now=now)
+        chosen = self.repository.list_due_words(now, self.review_size)
         if not chosen:
             self.telegram.send_message(
                 self.owner_chat_id,
-                "今天還沒有可複習的單字。先傳一個英文單字給我吧。",
+                "目前沒有到期的單字。新的單字會依你的評分安排下次複習。",
             )
             return []
 
-        for message in render_daily_review(chosen, local_date):
-            self.telegram.send_message(self.owner_chat_id, message)
+        for index, item in enumerate(chosen, start=1):
+            self.telegram.send_message(
+                self.owner_chat_id,
+                render_review_prompt(
+                    item,
+                    index=index,
+                    total=len(chosen),
+                    date=local_date,
+                ),
+                reply_markup=review_keyboard(item.word),
+            )
 
         selected_words = [item.word for item in chosen]
-        self.repository.mark_reviewed(selected_words, now)
         if not force:
             self.repository.save_delivery(DailyDelivery(date=local_date, words=selected_words))
         return selected_words

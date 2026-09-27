@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import httpx
 
 from vocab_bot.models import StoredWord, VocabularyCard
+from vocab_bot.spaced_repetition import ReviewGrade, encode_review_callback
 
 
 class TelegramError(RuntimeError):
@@ -17,24 +18,57 @@ class TelegramClient:
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.timeout = timeout
 
-    def send_message(self, chat_id: int, text: str) -> None:
+    def send_message(self, chat_id: int, text: str, *, reply_markup: dict | None = None) -> None:
+        payload: dict[str, object] = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         try:
             response = httpx.post(
                 f"{self.base_url}/sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": text,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
-                },
+                json=payload,
                 timeout=self.timeout,
             )
             response.raise_for_status()
             payload = response.json()
-            if not payload.get("ok"):
+            if not isinstance(payload, dict) or not payload.get("ok"):
                 raise TelegramError("Telegram rejected the message")
         except (httpx.HTTPError, ValueError) as exc:
             raise TelegramError("Telegram message delivery failed") from exc
+
+    def answer_callback_query(self, callback_query_id: str, text: str) -> None:
+        self._post(
+            "answerCallbackQuery",
+            {"callback_query_id": callback_query_id, "text": text},
+        )
+
+    def remove_inline_keyboard(self, chat_id: int, message_id: int) -> None:
+        self._post(
+            "editMessageReplyMarkup",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "reply_markup": {"inline_keyboard": []},
+            },
+        )
+
+    def _post(self, method: str, payload: dict[str, object]) -> None:
+        try:
+            response = httpx.post(
+                f"{self.base_url}/{method}",
+                json=payload,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            body = response.json()
+            if not isinstance(body, dict) or not body.get("ok"):
+                raise TelegramError(f"Telegram rejected {method}")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise TelegramError(f"Telegram {method} failed") from exc
 
 
 def _phonetic(value: str) -> str:
@@ -68,19 +102,43 @@ def render_card(card: VocabularyCard) -> str:
     )
 
 
-def render_daily_review(words: Sequence[StoredWord], date: str) -> list[str]:
-    header = f"<b>Daily Review · {html.escape(date)}</b>"
-    lines = []
-    for index, item in enumerate(words, start=1):
-        meaning = "；".join(html.escape(value) for value in item.meanings_zh)
-        phonetic = f" {_phonetic(item.kk_phonetic)}" if item.kk_phonetic else ""
-        parts = ", ".join(html.escape(value) for value in item.part_of_speech)
-        parts = parts or "詞性未標註"
-        lines.append(
-            f"<b>{index}. {html.escape(item.word)}</b>{phonetic} · <i>{parts}</i> · {meaning}"
-        )
+def render_review_prompt(item: StoredWord, *, index: int, total: int, date: str) -> str:
+    meaning = "；".join(html.escape(value) for value in item.meanings_zh)
+    phonetic = f" {_phonetic(item.kk_phonetic)}" if item.kk_phonetic else ""
+    parts = ", ".join(html.escape(value) for value in item.part_of_speech)
+    parts = parts or "詞性未標註"
+    return (
+        f"<b>Daily Review · {html.escape(date)}</b>\n"
+        f"{index} / {total}\n\n"
+        f"<b>{html.escape(item.word)}</b>{phonetic}\n"
+        f"<i>{parts}</i> · {meaning}\n\n"
+        "你記得這個單字嗎？"
+    )
 
-    return _chunk_lines(header, lines)
+
+def review_keyboard(word: str) -> dict[str, list[list[dict[str, str]]]]:
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "Again",
+                    "callback_data": encode_review_callback(word, ReviewGrade.AGAIN),
+                },
+                {
+                    "text": "Hard",
+                    "callback_data": encode_review_callback(word, ReviewGrade.HARD),
+                },
+                {
+                    "text": "Good",
+                    "callback_data": encode_review_callback(word, ReviewGrade.GOOD),
+                },
+                {
+                    "text": "Easy",
+                    "callback_data": encode_review_callback(word, ReviewGrade.EASY),
+                },
+            ]
+        ]
+    }
 
 
 def render_word_list(words: Sequence[StoredWord]) -> list[str]:
@@ -126,4 +184,4 @@ HELP_TEXT = """<b>Mnemosyne</b>
 /help — 顯示說明
 /stats — 查看已收藏的單字數量
 /words — 列出所有已儲存單字
-/review — 立即產生一輪 weighted review"""
+/review — 複習目前到期的單字，並依記憶程度安排下次複習"""
