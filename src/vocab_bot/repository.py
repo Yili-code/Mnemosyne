@@ -20,6 +20,8 @@ class Repository(Protocol):
 
     def list_words(self) -> list[StoredWord]: ...
 
+    def get_word(self, word: str) -> StoredWord | None: ...
+
     def list_due_words(self, now: datetime, limit: int) -> list[StoredWord]: ...
 
     def grade_review(
@@ -37,6 +39,8 @@ class Repository(Protocol):
     def reschedule_retry(self, pending: PendingWord) -> None: ...
 
     def delete_retry(self, word: str) -> None: ...
+
+    def clear_user_data(self) -> dict[str, int]: ...
 
 
 def card_to_words(card: VocabularyCard) -> list[StoredWord]:
@@ -141,6 +145,12 @@ class SQLiteRepository:
         rows = self.connection.execute("SELECT payload FROM words ORDER BY word").fetchall()
         return [StoredWord.model_validate_json(row[0]) for row in rows]
 
+    def get_word(self, word: str) -> StoredWord | None:
+        row = self.connection.execute(
+            "SELECT payload FROM words WHERE word = ?", (word,)
+        ).fetchone()
+        return StoredWord.model_validate_json(row[0]) if row else None
+
     def list_due_words(self, now: datetime, limit: int) -> list[StoredWord]:
         return select_due_words(self.list_words(), now=now, limit=limit)
 
@@ -221,6 +231,22 @@ class SQLiteRepository:
         with self.connection:
             self.connection.execute("DELETE FROM pending_words WHERE word = ?", (word,))
 
+    def clear_user_data(self) -> dict[str, int]:
+        with self.connection:
+            counts = {
+                "words": self.connection.execute("SELECT COUNT(*) FROM words").fetchone()[0],
+                "pending_words": self.connection.execute(
+                    "SELECT COUNT(*) FROM pending_words"
+                ).fetchone()[0],
+                "deliveries": self.connection.execute("SELECT COUNT(*) FROM deliveries").fetchone()[
+                    0
+                ],
+            }
+            self.connection.execute("DELETE FROM words")
+            self.connection.execute("DELETE FROM pending_words")
+            self.connection.execute("DELETE FROM deliveries")
+        return counts
+
 
 class FirestoreRepository:
     def __init__(self, project: str | None = None) -> None:
@@ -252,6 +278,10 @@ class FirestoreRepository:
     def list_words(self) -> list[StoredWord]:
         documents = self.client.collection("words").stream()
         return [StoredWord.model_validate(doc.to_dict()) for doc in documents]
+
+    def get_word(self, word: str) -> StoredWord | None:
+        snapshot = self.client.collection("words").document(word).get()
+        return StoredWord.model_validate(snapshot.to_dict()) if snapshot.exists else None
 
     def list_due_words(self, now: datetime, limit: int) -> list[StoredWord]:
         # Filtering in Python keeps older Firestore documents compatible because
@@ -331,6 +361,26 @@ class FirestoreRepository:
 
     def delete_retry(self, word: str) -> None:
         self.client.collection("pending_words").document(word).delete()
+
+    def clear_user_data(self) -> dict[str, int]:
+        return {
+            "words": self._delete_collection("words"),
+            "pending_words": self._delete_collection("pending_words"),
+            "deliveries": self._delete_collection("daily_deliveries"),
+        }
+
+    def _delete_collection(self, name: str) -> int:
+        deleted = 0
+        collection = self.client.collection(name)
+        while True:
+            documents = list(collection.limit(450).stream())
+            if not documents:
+                return deleted
+            batch = self.client.batch()
+            for document in documents:
+                batch.delete(document.reference)
+            batch.commit()
+            deleted += len(documents)
 
 
 def dump_words(words: Sequence[StoredWord]) -> str:

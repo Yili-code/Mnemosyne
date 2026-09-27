@@ -5,6 +5,7 @@ from vocab_bot.repository import card_to_words
 from vocab_bot.telegram import (
     TelegramClient,
     TelegramError,
+    clear_database_keyboard,
     render_card,
     render_review_prompt,
     render_word_list,
@@ -39,6 +40,15 @@ def test_review_prompt_has_grade_buttons_but_no_example() -> None:
         "Hard",
         "Good",
         "Easy",
+    ]
+
+
+def test_clear_database_keyboard_requires_confirmation() -> None:
+    keyboard = clear_database_keyboard()
+    buttons = keyboard["inline_keyboard"][0]
+    assert [(button["text"], button["callback_data"]) for button in buttons] == [
+        ("確認清空", "clear:confirm"),
+        ("取消", "clear:cancel"),
     ]
 
 

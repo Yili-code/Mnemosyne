@@ -17,6 +17,7 @@ class FakeRepository:
         self.deliveries: dict[str, DailyDelivery] = {}
         self.pending: dict[str, PendingWord] = {}
         self.saved_cards = 0
+        self.clear_calls = 0
 
     def claim_update(self, update_id: int) -> bool:
         if update_id in self.updates:
@@ -30,6 +31,9 @@ class FakeRepository:
 
     def list_words(self) -> list[StoredWord]:
         return self.words
+
+    def get_word(self, word: str) -> StoredWord | None:
+        return next((item for item in self.words if item.word == word), None)
 
     def list_due_words(self, now: datetime, limit: int) -> list[StoredWord]:
         return select_due_words(self.words, now=now, limit=limit)
@@ -62,6 +66,18 @@ class FakeRepository:
 
     def delete_retry(self, word: str) -> None:
         self.pending.pop(word, None)
+
+    def clear_user_data(self) -> dict[str, int]:
+        self.clear_calls += 1
+        counts = {
+            "words": len(self.words),
+            "pending_words": len(self.pending),
+            "deliveries": len(self.deliveries),
+        }
+        self.words.clear()
+        self.pending.clear()
+        self.deliveries.clear()
+        return counts
 
 
 class FakeGemini:
@@ -203,12 +219,22 @@ def test_review_queue_returns_without_sending_telegram_messages() -> None:
 def test_review_worker_sends_exactly_one_card() -> None:
     service, repository, _, telegram = make_service()
     item = card_to_words(make_card())[0]
+    repository.words = [item]
 
     service.send_review_card(ReviewTaskPayload(chat_id=123, item=item))
 
     assert len(telegram.messages) == 1
     assert telegram.messages[0][0] == 123
     assert telegram.messages[0][2] is not None
+
+
+def test_review_worker_skips_a_word_deleted_after_enqueue() -> None:
+    service, repository, _, telegram = make_service()
+    item = card_to_words(make_card())[0]
+
+    service.send_review_card(ReviewTaskPayload(chat_id=123, item=item))
+
+    assert not telegram.messages
 
 
 def test_review_worker_rejects_a_different_chat() -> None:
@@ -256,6 +282,85 @@ def test_review_callback_grades_word_once_and_removes_buttons() -> None:
     assert "Good" in telegram.callback_answers[0][1]
     assert "已評分" in telegram.callback_answers[1][1]
     assert telegram.removed_keyboards == [(123, 55), (123, 55)]
+
+
+def test_clear_command_requires_explicit_confirmation() -> None:
+    service, repository, _, telegram = make_service()
+    repository.words = card_to_words(make_card())
+
+    service.handle_update(
+        {
+            "update_id": 300,
+            "message": {"chat": {"id": 123, "type": "private"}, "text": "/clear"},
+        }
+    )
+
+    assert repository.clear_calls == 0
+    assert len(repository.words) == 4
+    keyboard = telegram.messages[-1][2]
+    assert keyboard is not None
+    assert [button["text"] for button in keyboard["inline_keyboard"][0]] == [
+        "確認清空",
+        "取消",
+    ]
+
+
+def test_clear_confirmation_deletes_learning_data() -> None:
+    service, repository, _, telegram = make_service()
+    repository.words = card_to_words(make_card())
+    repository.deliveries["2026-09-27"] = DailyDelivery(date="2026-09-27", words=["leverage"])
+    repository.pending["retry"] = PendingWord(
+        word="retry",
+        chat_id=123,
+        last_error_code="timeout",
+        next_attempt_at=datetime.now(UTC),
+    )
+
+    service.handle_update(
+        {
+            "update_id": 301,
+            "callback_query": {
+                "id": "clear-callback",
+                "from": {"id": 123},
+                "data": "clear:confirm",
+                "message": {
+                    "message_id": 60,
+                    "chat": {"id": 123, "type": "private"},
+                },
+            },
+        }
+    )
+
+    assert repository.clear_calls == 1
+    assert not repository.words
+    assert not repository.deliveries
+    assert not repository.pending
+    assert telegram.removed_keyboards == [(123, 60)]
+    assert "4</b> 個單字" in telegram.messages[-1][1]
+
+
+def test_clear_cancellation_preserves_learning_data() -> None:
+    service, repository, _, telegram = make_service()
+    repository.words = card_to_words(make_card())
+
+    service.handle_update(
+        {
+            "update_id": 302,
+            "callback_query": {
+                "id": "cancel-callback",
+                "from": {"id": 123},
+                "data": "clear:cancel",
+                "message": {
+                    "message_id": 61,
+                    "chat": {"id": 123, "type": "private"},
+                },
+            },
+        }
+    )
+
+    assert repository.clear_calls == 0
+    assert len(repository.words) == 4
+    assert telegram.removed_keyboards == [(123, 61)]
 
 
 def test_expired_callback_ack_does_not_hide_a_successful_grade() -> None:

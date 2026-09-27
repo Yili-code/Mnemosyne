@@ -136,6 +136,17 @@ def review_keyboard(word: str) -> dict[str, list[list[dict[str, str]]]]:
     }
 
 
+def clear_database_keyboard() -> dict[str, list[list[dict[str, str]]]]:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "確認清空", "callback_data": "clear:confirm"},
+                {"text": "取消", "callback_data": "clear:cancel"},
+            ]
+        ]
+    }
+
+
 def render_word_list(words: Sequence[StoredWord]) -> list[str]:
     ordered = sorted(words, key=lambda item: item.word)
     header = f"<b>已儲存單字</b>\n共 {len(ordered)} 個"
@@ -179,4 +190,5 @@ HELP_TEXT = """<b>Mnemosyne</b>
 /help — 顯示說明
 /stats — 查看已收藏的單字數量
 /words — 列出所有已儲存單字
-/review — 複習目前到期的單字，並依記憶程度安排下次複習"""
+/review — 複習目前到期的單字，並依記憶程度安排下次複習
+/clear — 經過確認後清空所有學習資料"""

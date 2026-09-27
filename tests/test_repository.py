@@ -1,7 +1,14 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from vocab_bot.models import Example, PendingWord, RelatedWord, StoredWord, VocabularyCard
+from vocab_bot.models import (
+    DailyDelivery,
+    Example,
+    PendingWord,
+    RelatedWord,
+    StoredWord,
+    VocabularyCard,
+)
 from vocab_bot.repository import SQLiteRepository
 from vocab_bot.spaced_repetition import ReviewGrade
 
@@ -107,3 +114,26 @@ def test_sqlite_retry_queue_persists_claims_and_completion(tmp_path: Path) -> No
     assert repository.claim_due_retry(now) is None
     repository.delete_retry("protestation")
     assert repository.claim_due_retry(now + timedelta(days=1)) is None
+
+
+def test_sqlite_clear_user_data_is_atomic_and_keeps_update_deduplication(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "words.sqlite3")
+    repository.save_card(make_card())
+    repository.save_delivery(DailyDelivery(date="2026-09-27", words=["leverage"]))
+    repository.enqueue_retry(
+        PendingWord(
+            word="protestation",
+            chat_id=123,
+            last_error_code="timeout",
+            next_attempt_at=datetime.now(UTC),
+        )
+    )
+    assert repository.claim_update(42) is True
+
+    counts = repository.clear_user_data()
+
+    assert counts == {"words": 4, "pending_words": 1, "deliveries": 1}
+    assert repository.list_words() == []
+    assert repository.get_delivery("2026-09-27") is None
+    assert repository.claim_due_retry(datetime.now(UTC) + timedelta(days=1)) is None
+    assert repository.claim_update(42) is False

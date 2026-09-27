@@ -17,6 +17,7 @@ from vocab_bot.telegram import (
     HELP_TEXT,
     TelegramClient,
     TelegramError,
+    clear_database_keyboard,
     render_card,
     render_review_prompt,
     render_word_list,
@@ -62,7 +63,7 @@ class VocabularyService:
         update_id = update.get("update_id")
         callback = update.get("callback_query")
         if isinstance(update_id, int) and isinstance(callback, dict):
-            self._handle_review_callback(callback)
+            self._handle_callback(callback)
             return
 
         message = update.get("message") or {}
@@ -92,6 +93,15 @@ class VocabularyService:
             return
         if stripped == "/review":
             self.send_review(force=True, delivery_key=f"telegram-{update_id}")
+            return
+        if stripped == "/clear":
+            count = len(self.repository.list_words())
+            self.telegram.send_message(
+                chat_id,
+                f"即將永久刪除 <b>{count}</b> 個單字，以及複習、每日傳送與失敗重試狀態。"
+                "此操作無法復原。",
+                reply_markup=clear_database_keyboard(),
+            )
             return
 
         word = normalize_input(stripped)
@@ -128,7 +138,7 @@ class VocabularyService:
         self.repository.delete_retry(word)
         self.telegram.send_message(chat_id, render_card(card))
 
-    def _handle_review_callback(self, callback: dict) -> None:
+    def _handle_callback(self, callback: dict) -> None:
         callback_id = callback.get("id")
         sender = callback.get("from") or {}
         message = callback.get("message") or {}
@@ -144,6 +154,15 @@ class VocabularyService:
             or chat.get("type") != "private"
             or not isinstance(data, str)
         ):
+            return
+
+        if data in {"clear:confirm", "clear:cancel"}:
+            self._handle_clear_callback(
+                callback_id=callback_id,
+                chat_id=chat_id,
+                message_id=message_id,
+                confirmed=data == "clear:confirm",
+            )
             return
 
         parsed = decode_review_callback(data)
@@ -170,6 +189,40 @@ class VocabularyService:
             message_id=message_id,
             text=f"{label}：{interval}後可再次出現。",
         )
+
+    def _handle_clear_callback(
+        self,
+        *,
+        callback_id: str,
+        chat_id: int,
+        message_id: object,
+        confirmed: bool,
+    ) -> None:
+        if not confirmed:
+            self._finish_review_callback(
+                callback_id=callback_id,
+                chat_id=chat_id,
+                message_id=message_id,
+                text="已取消清空。",
+            )
+            return
+
+        counts = self.repository.clear_user_data()
+        self._finish_review_callback(
+            callback_id=callback_id,
+            chat_id=chat_id,
+            message_id=message_id,
+            text="資料庫已清空。",
+        )
+        try:
+            self.telegram.send_message(
+                chat_id,
+                f"資料庫已清空：刪除 <b>{counts['words']}</b> 個單字、"
+                f"<b>{counts['pending_words']}</b> 個待重試項目與 "
+                f"<b>{counts['deliveries']}</b> 筆每日傳送紀錄。",
+            )
+        except TelegramError as exc:
+            logger.warning("Clear-database confirmation message failed: %s", exc)
 
     def _finish_review_callback(
         self,
@@ -266,8 +319,12 @@ class VocabularyService:
     def send_review_card(self, payload: ReviewTaskPayload) -> None:
         if payload.chat_id != self.owner_chat_id:
             raise ValueError("Review task chat does not match the configured owner")
+        current = self.repository.get_word(payload.item.word)
+        if current is None:
+            logger.info("Skipped queued review for deleted word=%s", payload.item.word)
+            return
         self.telegram.send_message(
             payload.chat_id,
-            render_review_prompt(payload.item),
-            reply_markup=review_keyboard(payload.item.word),
+            render_review_prompt(current),
+            reply_markup=review_keyboard(current.word),
         )
