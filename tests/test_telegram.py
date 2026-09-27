@@ -1,5 +1,15 @@
+import httpx
+import pytest
+
 from vocab_bot.repository import card_to_words
-from vocab_bot.telegram import render_card, render_review_prompt, render_word_list, review_keyboard
+from vocab_bot.telegram import (
+    TelegramClient,
+    TelegramError,
+    render_card,
+    render_review_prompt,
+    render_word_list,
+    review_keyboard,
+)
 
 from .test_repository import make_card
 
@@ -39,3 +49,19 @@ def test_word_list_renders_all_words_without_examples() -> None:
     assert "leverage" in combined
     assert "utilize" in combined
     assert "We can leverage this tool." not in combined
+
+
+def test_telegram_error_suppresses_the_token_bearing_provider_exception(monkeypatch) -> None:
+    request = httpx.Request("POST", "https://api.telegram.org/botsecret-token/sendMessage")
+    response = httpx.Response(500, request=request)
+
+    def fail(*args, **kwargs):
+        raise httpx.HTTPStatusError("provider failed", request=request, response=response)
+
+    monkeypatch.setattr(httpx, "post", fail)
+
+    with pytest.raises(TelegramError) as captured:
+        TelegramClient("secret-token").send_message(123, "test")
+
+    assert captured.value.__cause__ is None
+    assert captured.value.__suppress_context__ is True

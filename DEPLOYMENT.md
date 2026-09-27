@@ -99,10 +99,10 @@ gcloud tasks queues create mnemosyne-review --location asia-east1 --max-dispatch
 ```
 
 如果 queue 已存在，改用 `gcloud tasks queues update` 搭配相同設定。再把 Cloud Run runtime
-service account 加入 project 的 `roles/cloudtasks.enqueuer`。
+service account 的 `roles/cloudtasks.enqueuer` 直接綁在這一條 queue，而不是整個 project。
 
 ```powershell
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID --member="serviceAccount:YOUR_RUNTIME_SERVICE_ACCOUNT" --role="roles/cloudtasks.enqueuer"
+gcloud tasks queues add-iam-policy-binding mnemosyne-review --location=asia-east1 --member="serviceAccount:YOUR_RUNTIME_SERVICE_ACCOUNT" --role="roles/cloudtasks.enqueuer"
 ```
 
 部署時額外加入以下 environment variables：

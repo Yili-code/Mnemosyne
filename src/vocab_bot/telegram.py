@@ -37,8 +37,9 @@ class TelegramClient:
             payload = response.json()
             if not isinstance(payload, dict) or not payload.get("ok"):
                 raise TelegramError("Telegram rejected the message")
-        except (httpx.HTTPError, ValueError) as exc:
-            raise TelegramError("Telegram message delivery failed") from exc
+        except (httpx.HTTPError, ValueError):
+            # httpx exceptions contain the request URL, which embeds the bot token.
+            raise TelegramError("Telegram message delivery failed") from None
 
     def answer_callback_query(self, callback_query_id: str, text: str) -> None:
         self._post(
@@ -67,8 +68,9 @@ class TelegramClient:
             body = response.json()
             if not isinstance(body, dict) or not body.get("ok"):
                 raise TelegramError(f"Telegram rejected {method}")
-        except (httpx.HTTPError, ValueError) as exc:
-            raise TelegramError(f"Telegram {method} failed") from exc
+        except (httpx.HTTPError, ValueError):
+            # Suppress the provider exception so credentials never enter application logs.
+            raise TelegramError(f"Telegram {method} failed") from None
 
 
 def _phonetic(value: str) -> str:
