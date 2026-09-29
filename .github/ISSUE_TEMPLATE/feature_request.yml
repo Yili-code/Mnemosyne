@@ -1,0 +1,41 @@
+name: Feature request
+description: Propose a focused improvement that fits the project scope
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the user or operator problem, not only the desired implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Explain the smallest useful change and how a user would experience it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Note any simpler workaround or existing command that nearly solves the problem.
+  - type: textarea
+    id: validation
+    attributes:
+      label: How would we validate it?
+      description: Suggest observable behavior, tests, or operational evidence.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This proposal preserves the current owner-only, self-hosted product model.
+          required: true
+        - label: I searched existing issues for a similar request.
+          required: true

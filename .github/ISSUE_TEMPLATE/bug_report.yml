@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible problem in Mnemosyne
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, private chat IDs, webhook secrets, or live vocabulary data.
+        For security vulnerabilities, use the private process in SECURITY.md instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest sequence that reliably reproduces the problem.
+      placeholder: |
+        1. Configure ...
+        2. Send ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: dropdown
+    id: boundary
+    attributes:
+      label: Affected boundary
+      options:
+        - Local application or SQLite
+        - Telegram webhook or rendering
+        - Gemini generation or validation
+        - Firestore persistence
+        - Cloud Tasks or Cloud Scheduler
+        - Documentation or setup
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Version or commit
+      description: A release, tag, or commit SHA if known.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Share relevant errors or logs after removing all secrets and personal data.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Python version, operating system, storage backend, and deployment target.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed credentials and personal data from this report.
+          required: true
