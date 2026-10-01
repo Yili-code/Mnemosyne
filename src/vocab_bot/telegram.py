@@ -97,13 +97,13 @@ def render_card(card: VocabularyCard) -> str:
         for item in card.related_words
     )
     collocation_block = f"\n\n<b>常見搭配</b>\n{collocations}" if collocations else ""
+    related_block = f"\n\n<b>相關詞彙</b>\n{related}" if related else ""
     return (
         f"<b>{html.escape(card.word)}</b>\n"
         f"{_phonetic(card.kk_phonetic)} · <i>{parts}</i>\n\n"
         f"<b>中文釋義</b>\n{meanings}\n\n"
         f"<b>用法</b>\n{usage}{collocation_block}\n\n"
-        f"<b>例句</b>\n{examples}\n\n"
-        f"<b>相關詞彙</b>\n{related}"
+        f"<b>例句</b>\n{examples}{related_block}"
     )
 
 

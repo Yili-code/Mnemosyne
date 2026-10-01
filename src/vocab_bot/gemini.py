@@ -24,9 +24,11 @@ including plurals, tense forms, -ing forms, ordinary noun/verb/adjective/adverb 
 Prefer synonyms, antonyms, common contrasts, conceptually adjacent words, or words commonly
 used in the same situation. A derivation is allowed only when its meaning is unusually distinct
 and worth learning independently; then set exceptional_derivation=true and explain why.
+Return at most 3 related words. Quality matters more than quantity: omit weak, obscure, redundant,
+or only loosely connected suggestions, even when that leaves fewer than 3 or no related words.
 
 Do not invent uncommon senses. Keep usage notes practical and concise. Return the input entry in
-lowercase, preserving its complete normalized wording, and exactly 5 related words when possible."""
+lowercase, preserving its complete normalized wording."""
 
 QUESTION_SYSTEM_PROMPT = """Answer questions for a Taiwanese university student who is improving
 English through real problems. Be accurate, concise, and direct. Use Traditional Chinese when it
@@ -108,11 +110,6 @@ class GeminiClient:
                 code="missing_learning_metadata",
             )
         filtered = filter_related(word, card.related_words)
-        if len(filtered) < 3:
-            raise GeminiError(
-                "Gemini returned too few valid independent related words",
-                code="too_few_related_words",
-            )
         return card.model_copy(update={"related_words": filtered})
 
     def answer_question(self, question: str) -> str:

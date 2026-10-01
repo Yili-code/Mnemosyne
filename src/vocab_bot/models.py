@@ -40,7 +40,7 @@ class VocabularyCard(BaseModel):
     usage_notes: list[str] = Field(min_length=1, max_length=4)
     collocations: list[str] = Field(default_factory=list, max_length=5)
     examples: list[Example] = Field(min_length=2, max_length=3)
-    related_words: list[RelatedWord] = Field(min_length=3, max_length=8)
+    related_words: list[RelatedWord] = Field(default_factory=list, max_length=3)
 
     @field_validator("word")
     @classmethod

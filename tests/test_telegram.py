@@ -30,6 +30,12 @@ def test_render_card_has_learning_sections_but_no_exam_labels() -> None:
     assert "\n\n<b>相關詞彙</b>\n" in rendered
 
 
+def test_render_card_omits_related_section_when_no_quality_words_remain() -> None:
+    rendered = render_card(make_card().model_copy(update={"related_words": []}))
+
+    assert "相關詞彙" not in rendered
+
+
 def test_review_prompt_has_grade_buttons_but_no_example() -> None:
     word = card_to_words(make_card())[0]
     rendered = render_review_prompt(word)
