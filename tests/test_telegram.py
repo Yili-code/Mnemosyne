@@ -97,6 +97,34 @@ def test_question_answer_escapes_gemini_output() -> None:
     assert rendered == "Use A &lt; B &amp; B &gt; C"
 
 
+def test_send_message_converts_simplified_chinese_before_delivery(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_post(url, *, json, timeout):
+        captured.update(json)
+        return httpx.Response(200, request=httpx.Request("POST", url), json={"ok": True})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    TelegramClient("secret-token").send_message(123, "这个软件使用数据库。")
+
+    assert captured["text"] == "這個軟體使用資料庫。"
+
+
+def test_callback_answer_converts_simplified_chinese_before_delivery(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_post(url, *, json, timeout):
+        captured.update(json)
+        return httpx.Response(200, request=httpx.Request("POST", url), json={"ok": True})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    TelegramClient("secret-token").answer_callback_query("callback-id", "已评分")
+
+    assert captured["text"] == "已評分"
+
+
 def test_telegram_error_suppresses_the_token_bearing_provider_exception(monkeypatch) -> None:
     request = httpx.Request("POST", "https://api.telegram.org/botsecret-token/sendMessage")
     response = httpx.Response(500, request=request)

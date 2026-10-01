@@ -7,6 +7,7 @@ import httpx
 
 from vocab_bot.models import StoredWord, VocabularyCard
 from vocab_bot.spaced_repetition import ReviewGrade, encode_review_callback
+from vocab_bot.traditional_chinese import to_taiwan_traditional
 
 
 class TelegramError(RuntimeError):
@@ -21,7 +22,7 @@ class TelegramClient:
     def send_message(self, chat_id: int, text: str, *, reply_markup: dict | None = None) -> None:
         payload: dict[str, object] = {
             "chat_id": chat_id,
-            "text": text,
+            "text": to_taiwan_traditional(text),
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
@@ -44,7 +45,10 @@ class TelegramClient:
     def answer_callback_query(self, callback_query_id: str, text: str) -> None:
         self._post(
             "answerCallbackQuery",
-            {"callback_query_id": callback_query_id, "text": text},
+            {
+                "callback_query_id": callback_query_id,
+                "text": to_taiwan_traditional(text),
+            },
         )
 
     def remove_inline_keyboard(self, chat_id: int, message_id: int) -> None:

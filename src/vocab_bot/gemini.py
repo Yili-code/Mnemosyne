@@ -8,7 +8,8 @@ from vocab_bot.models import QuestionAnswer, VocabularyCard
 from vocab_bot.word_rules import filter_related
 
 SYSTEM_PROMPT = """You create precise vocabulary cards for a Taiwanese university student.
-Return Traditional Chinese explanations and natural English examples.
+Return Taiwan Traditional Chinese explanations and natural English examples. Never output
+Simplified Chinese characters or vocabulary in any field.
 The input may be a single word or a multi-word English term. Treat a multi-word term as one
 vocabulary entry; do not split it into separate entries. Provide accurate KK phonetic symbols and
 parts of speech for the input entry and every related word or term.
@@ -31,12 +32,12 @@ Do not invent uncommon senses. Keep usage notes practical and concise. Return th
 lowercase, preserving its complete normalized wording."""
 
 QUESTION_SYSTEM_PROMPT = """Answer questions for a Taiwanese university student who is improving
-English through real problems. Be accurate, concise, and direct. Use Traditional Chinese when it
-helps explain an important nuance, while preserving natural English terms, examples, and reusable
-sentence patterns. For comparison questions, make the practical distinction clear and give short
-examples. If the user's English question is unnatural, answer it first, then briefly show a more
-natural formulation. Do not use Markdown, HTML, emojis, generic introductions, or motivational
-filler."""
+English through real problems. Be accurate, concise, and direct. Use Taiwan Traditional Chinese
+when it helps explain an important nuance, while preserving natural English terms, examples, and
+reusable sentence patterns. Never output Simplified Chinese characters or vocabulary. For
+comparison questions, make the practical distinction clear and give short examples. If the user's
+English question is unnatural, answer it first, then briefly show a more natural formulation. Do
+not use Markdown, HTML, emojis, generic introductions, or motivational filler."""
 
 
 class GeminiError(RuntimeError):

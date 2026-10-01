@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import httpx
 
-from vocab_bot.gemini import GeminiClient
+from vocab_bot.gemini import QUESTION_SYSTEM_PROMPT, SYSTEM_PROMPT, GeminiClient
 from vocab_bot.models import RelatedWord
 
 from .test_repository import make_card
+
+
+def test_prompts_forbid_simplified_chinese() -> None:
+    for prompt in (SYSTEM_PROMPT, QUESTION_SYSTEM_PROMPT):
+        assert "Never output" in prompt
+        assert "Simplified Chinese" in prompt
 
 
 def test_create_card_uses_json_schema_field(monkeypatch) -> None:
