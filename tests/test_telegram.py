@@ -3,6 +3,7 @@ import pytest
 
 from vocab_bot.repository import card_to_words
 from vocab_bot.telegram import (
+    HELP_TEXT,
     TelegramClient,
     TelegramError,
     clear_database_keyboard,
@@ -15,6 +16,15 @@ from vocab_bot.telegram import (
 )
 
 from .test_repository import make_card
+
+
+def test_help_text_is_all_english_and_lists_every_command() -> None:
+    assert not any("\u4e00" <= character <= "\u9fff" for character in HELP_TEXT)
+    assert "<b>Commands</b>" in HELP_TEXT
+    assert "/ask <code>question</code>" in HELP_TEXT
+    assert "/search <code>word or phrase</code>" in HELP_TEXT
+    for command in ("/help", "/ask", "/search", "/words", "/review", "/clear"):
+        assert command in HELP_TEXT
 
 
 def test_render_card_has_learning_sections_but_no_exam_labels() -> None:

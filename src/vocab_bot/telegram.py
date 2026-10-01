@@ -207,17 +207,20 @@ def _chunk_lines(header: str, lines: Sequence[str]) -> list[str]:
 
 
 HELP_TEXT = """<b>Mnemosyne</b>
-直接傳送一個英文單字或片語，我會回覆：
-• 中文意思與實際用法
-• 自然例句
-• 常見搭配
-• TOEIC、IELTS 或日常英文中實用的相關詞彙
-(普通複數、時態與常規衍生詞不會列入相關詞彙)
 
-指令：
-/help — 顯示說明
-/ask What's the difference between assignment and homework? — 詢問問題，不儲存為詞彙
-/search canonical record — 搜尋已儲存詞彙，不新增資料
-/words — 列出所有已儲存詞彙
-/review — 複習目前到期的詞彙，並依記憶程度安排下次複習
-/clear — 經過確認後清空所有學習資料"""
+Send me any English word or phrase. I'll reply with:
+• Meaning
+• Practical usage
+• Natural example sentences
+• Common collocations
+• Related vocabulary
+
+<b>Commands</b>
+/help — Show this guide
+/words — List all saved vocabulary
+
+/ask <code>question</code> — Ask a question without saving it
+/search <code>word or phrase</code> — Search saved vocabulary without adding anything
+
+/review — Review due words and schedule the next review
+/clear — Delete all learning data after confirmation"""
