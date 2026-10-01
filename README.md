@@ -34,6 +34,12 @@ operate the Telegram, Gemini, and Google Cloud credentials for your own instance
 - Uses Cloud Tasks to rate-limit and retry production review delivery.
 - Rejects non-owner chats, duplicate Telegram updates, and unauthenticated task requests.
 
+## Current status and evidence
+
+Mnemosyne is a deployed, self-used alpha—not a validated learning product. The maintainer currently uses the owner-only Telegram instance and has completed a small number of review sessions. Its data has also been deliberately cleared while the workflow was changing, so the project does not yet claim vocabulary retention, long-term engagement, or public-user adoption.
+
+The screenshots below are from the real deployed workflow. They demonstrate that generation and review interactions exist; they do not by themselves establish learning effectiveness. The next product milestone is to preserve a stable personal dataset across releases and observe repeated review behavior over time.
+
 ## Product flow
 
 1. Send one English word or phrase, for example `glory` or `canonical record`.
