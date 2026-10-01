@@ -4,7 +4,7 @@ import json
 
 import httpx
 
-from vocab_bot.models import VocabularyCard
+from vocab_bot.models import QuestionAnswer, VocabularyCard
 from vocab_bot.word_rules import filter_related
 
 SYSTEM_PROMPT = """You create precise vocabulary cards for a Taiwanese university student.
@@ -27,6 +27,14 @@ and worth learning independently; then set exceptional_derivation=true and expla
 
 Do not invent uncommon senses. Keep usage notes practical and concise. Return the input entry in
 lowercase, preserving its complete normalized wording, and exactly 5 related words when possible."""
+
+QUESTION_SYSTEM_PROMPT = """Answer questions for a Taiwanese university student who is improving
+English through real problems. Be accurate, concise, and direct. Use Traditional Chinese when it
+helps explain an important nuance, while preserving natural English terms, examples, and reusable
+sentence patterns. For comparison questions, make the practical distinction clear and give short
+examples. If the user's English question is unnatural, answer it first, then briefly show a more
+natural formulation. Do not use Markdown, HTML, emojis, generic introductions, or motivational
+filler."""
 
 
 class GeminiError(RuntimeError):
@@ -106,3 +114,44 @@ class GeminiClient:
                 code="too_few_related_words",
             )
         return card.model_copy(update={"related_words": filtered})
+
+    def answer_question(self, question: str) -> str:
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        )
+        payload = {
+            "system_instruction": {"parts": [{"text": QUESTION_SYSTEM_PROMPT}]},
+            "contents": [{"role": "user", "parts": [{"text": question}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseJsonSchema": QuestionAnswer.model_json_schema(),
+                "temperature": 0.25,
+                "maxOutputTokens": 1200,
+            },
+        }
+        try:
+            response = httpx.post(
+                url,
+                params={"key": self.api_key},
+                json=payload,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            body = response.json()
+            text = body["candidates"][0]["content"]["parts"][0]["text"]
+            result = QuestionAnswer.model_validate(json.loads(text))
+        except httpx.TimeoutException as exc:
+            raise GeminiError("Gemini request timed out", code="timeout") from exc
+        except httpx.HTTPStatusError as exc:
+            raise GeminiError(
+                "Gemini returned an HTTP error",
+                code=f"http_{exc.response.status_code}",
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise GeminiError("Gemini transport failed", code="transport") from exc
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise GeminiError(
+                "Gemini could not create a valid answer",
+                code="invalid_response",
+            ) from exc
+        return result.answer.strip()

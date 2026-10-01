@@ -48,6 +48,12 @@ class VocabularyCard(BaseModel):
         return " ".join(value.lower().split())
 
 
+class QuestionAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str = Field(min_length=1, max_length=3000)
+
+
 class StoredWord(BaseModel):
     word: str
     kk_phonetic: str = ""

@@ -19,6 +19,7 @@ from vocab_bot.telegram import (
     TelegramError,
     clear_database_keyboard,
     render_card,
+    render_question_answer,
     render_review_prompt,
     render_search_result,
     render_word_list,
@@ -83,6 +84,24 @@ class VocabularyService:
         stripped = text.strip()
         if stripped in {"/start", "/help"}:
             self.telegram.send_message(chat_id, HELP_TEXT)
+            return
+        if stripped == "/ask" or stripped.startswith("/ask "):
+            _, _, raw_question = stripped.partition(" ")
+            question = " ".join(raw_question.split())
+            if not question:
+                self.telegram.send_message(
+                    chat_id,
+                    "請在 <code>/ask</code> 後輸入問題，例如：\n"
+                    "<code>/ask What's the difference between assignment and homework?</code>",
+                )
+                return
+            try:
+                answer = self.gemini.answer_question(question)
+            except GeminiError as exc:
+                logger.warning("Gemini question failed code=%s", exc.code)
+                self.telegram.send_message(chat_id, "Gemini 暫時無法回答，請稍後再試。")
+                return
+            self.telegram.send_message(chat_id, render_question_answer(answer))
             return
         if stripped == "/search" or stripped.startswith("/search "):
             _, _, query = stripped.partition(" ")

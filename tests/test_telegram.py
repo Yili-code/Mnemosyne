@@ -7,6 +7,7 @@ from vocab_bot.telegram import (
     TelegramError,
     clear_database_keyboard,
     render_card,
+    render_question_answer,
     render_review_prompt,
     render_search_result,
     render_word_list,
@@ -72,6 +73,12 @@ def test_search_result_renders_the_stored_content() -> None:
     assert "<b>用法</b>" in rendered
     assert "<b>常見搭配</b>" in rendered
     assert "We can leverage this tool." in rendered
+
+
+def test_question_answer_escapes_gemini_output() -> None:
+    rendered = render_question_answer("Use A < B & B > C")
+
+    assert rendered == "Use A &lt; B &amp; B &gt; C"
 
 
 def test_telegram_error_suppresses_the_token_bearing_provider_exception(monkeypatch) -> None:

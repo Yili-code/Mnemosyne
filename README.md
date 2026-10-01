@@ -109,6 +109,7 @@ After completing [DEPLOYMENT.md](DEPLOYMENT.md), open the configured bot's priva
 | Input | Behavior |
 | --- | --- |
 | `meticulous` or `canonical record` | Generate, validate, save, and return one vocabulary card |
+| `/ask What's the difference between assignment and homework?` | Ask a question through Gemini without saving it as vocabulary |
 | `/search canonical record` | Read one exact saved term without writing data or calling Gemini |
 | `/review` | Send due words for recall grading |
 | `/words` | List saved words, parts of speech, and Chinese meanings |

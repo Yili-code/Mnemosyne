@@ -71,3 +71,38 @@ def test_create_card_preserves_a_multi_word_term(monkeypatch) -> None:
     card = GeminiClient("test-key", "test-model").create_card(term)
 
     assert card.word == term
+
+
+def test_answer_question_uses_structured_output(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_post(url, *, params, json, timeout):
+        captured.update(json)
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": '{"answer":"An assignment is a specific task; '
+                                    'homework is work done outside class."}'
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    answer = GeminiClient("test-key", "test-model").answer_question(
+        "What's the difference between assignment and homework?"
+    )
+
+    assert answer.startswith("An assignment")
+    assert captured["contents"][0]["parts"][0]["text"].startswith("What's the difference")
+    assert "responseJsonSchema" in captured["generationConfig"]

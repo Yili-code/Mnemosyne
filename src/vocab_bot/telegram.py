@@ -139,6 +139,10 @@ def render_search_result(item: StoredWord) -> str:
     return "\n\n".join(sections)
 
 
+def render_question_answer(answer: str) -> str:
+    return html.escape(answer.strip())
+
+
 def review_keyboard(word: str) -> dict[str, list[list[dict[str, str]]]]:
     return {
         "inline_keyboard": [
@@ -212,6 +216,7 @@ HELP_TEXT = """<b>Mnemosyne</b>
 
 指令：
 /help — 顯示說明
+/ask What's the difference between assignment and homework? — 詢問問題，不儲存為詞彙
 /search canonical record — 搜尋已儲存詞彙，不新增資料
 /words — 列出所有已儲存詞彙
 /review — 複習目前到期的詞彙，並依記憶程度安排下次複習

@@ -89,6 +89,11 @@ class FakeGemini:
         assert word == "leverage"
         return make_card()
 
+    def answer_question(self, question: str) -> str:
+        self.calls += 1
+        assert question == "What's the difference between assignment and homework?"
+        return "An assignment is a specific task; homework is work done outside class."
+
 
 class PhraseGemini(FakeGemini):
     def create_card(self, word: str):
@@ -299,6 +304,40 @@ def test_search_requires_one_valid_term() -> None:
     assert gemini.calls == 0
     assert repository.saved_cards == 0
     assert "/search canonical record" in telegram.messages[0][1]
+
+
+def test_ask_answers_question_without_saving_vocabulary() -> None:
+    service, repository, gemini, telegram = make_service()
+
+    service.handle_update(
+        {
+            "update_id": 109,
+            "message": {
+                "chat": {"id": 123, "type": "private"},
+                "text": "/ask  What's the difference between assignment and homework? ",
+            },
+        }
+    )
+
+    assert gemini.calls == 1
+    assert repository.saved_cards == 0
+    assert not repository.words
+    assert "An assignment is a specific task" in telegram.messages[0][1]
+
+
+def test_ask_requires_a_question_without_calling_gemini() -> None:
+    service, repository, gemini, telegram = make_service()
+
+    service.handle_update(
+        {
+            "update_id": 110,
+            "message": {"chat": {"id": 123, "type": "private"}, "text": "/ask"},
+        }
+    )
+
+    assert gemini.calls == 0
+    assert repository.saved_cards == 0
+    assert "/ask What's the difference" in telegram.messages[0][1]
 
 
 def test_removed_stats_command_is_not_routed() -> None:
