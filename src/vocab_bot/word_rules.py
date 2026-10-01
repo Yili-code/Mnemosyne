@@ -4,12 +4,13 @@ import re
 
 from vocab_bot.models import RelatedWord
 
-WORD_PATTERN = re.compile(r"^[A-Za-z]+(?:[-'][A-Za-z]+)?$")
+TOKEN = r"[A-Za-z]+(?:[-'][A-Za-z]+)*"
+TERM_PATTERN = re.compile(rf"^{TOKEN}(?: {TOKEN})*$")
 
 
 def normalize_input(text: str) -> str | None:
-    candidate = text.strip().lower()
-    if not candidate or len(candidate) > 50 or not WORD_PATTERN.fullmatch(candidate):
+    candidate = " ".join(text.lower().split())
+    if not candidate or len(candidate) > 50 or not TERM_PATTERN.fullmatch(candidate):
         return None
     return candidate
 

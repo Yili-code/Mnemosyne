@@ -9,7 +9,9 @@ from vocab_bot.word_rules import filter_related
 
 SYSTEM_PROMPT = """You create precise vocabulary cards for a Taiwanese university student.
 Return Traditional Chinese explanations and natural English examples.
-Provide accurate KK phonetic symbols and parts of speech for the headword and every related word.
+The input may be a single word or a multi-word English term. Treat a multi-word term as one
+vocabulary entry; do not split it into separate entries. Provide accurate KK phonetic symbols and
+parts of speech for the input entry and every related word or term.
 Return the phonetic symbols without surrounding square brackets or slashes.
 
 Write like a concise human-edited dictionary. Do not use emojis, motivational filler, generic
@@ -23,8 +25,8 @@ Prefer synonyms, antonyms, common contrasts, conceptually adjacent words, or wor
 used in the same situation. A derivation is allowed only when its meaning is unusually distinct
 and worth learning independently; then set exceptional_derivation=true and explain why.
 
-Do not invent uncommon senses. Keep usage notes practical and concise. Return the headword in
-lowercase and exactly 5 related words when possible."""
+Do not invent uncommon senses. Keep usage notes practical and concise. Return the input entry in
+lowercase, preserving its complete normalized wording, and exactly 5 related words when possible."""
 
 
 class GeminiError(RuntimeError):

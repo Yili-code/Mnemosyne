@@ -90,6 +90,13 @@ class FakeGemini:
         return make_card()
 
 
+class PhraseGemini(FakeGemini):
+    def create_card(self, word: str):
+        self.calls += 1
+        assert word == "canonical record"
+        return make_card().model_copy(update={"word": word})
+
+
 class FakeTelegram:
     def __init__(self) -> None:
         self.messages: list[tuple[int, str, dict | None]] = []
@@ -160,6 +167,35 @@ def test_update_retry_does_not_call_gemini_twice() -> None:
     assert len(telegram.messages) == 2
 
 
+def test_multi_word_term_is_generated_and_saved_as_one_entry() -> None:
+    repository = FakeRepository()
+    gemini = PhraseGemini()
+    telegram = FakeTelegram()
+    service = VocabularyService(
+        repository=repository,
+        gemini=gemini,
+        telegram=telegram,
+        owner_chat_id=123,
+        review_size=2,
+        timezone="Asia/Taipei",
+    )
+
+    service.handle_update(
+        {
+            "update_id": 107,
+            "message": {
+                "chat": {"id": 123, "type": "private"},
+                "text": "  Canonical   Record ",
+            },
+        }
+    )
+
+    assert gemini.calls == 1
+    assert repository.saved_cards == 1
+    assert repository.get_word("canonical record") is not None
+    assert "正在整理 <b>canonical record</b>" in telegram.messages[0][1]
+
+
 def test_non_owner_message_is_ignored() -> None:
     service, repository, gemini, telegram = make_service()
     service.handle_update(
@@ -185,7 +221,7 @@ def test_words_command_lists_repository_without_calling_gemini() -> None:
     )
 
     assert gemini.calls == 0
-    assert "已儲存單字" in telegram.messages[0][1]
+    assert "已儲存詞彙" in telegram.messages[0][1]
     assert "leverage" in telegram.messages[0][1]
 
 
@@ -211,6 +247,25 @@ def test_search_returns_one_stored_word_without_writing_or_calling_gemini() -> N
     assert "中文釋義" in telegram.messages[0][1]
 
 
+def test_search_returns_a_saved_multi_word_term_without_writing() -> None:
+    service, repository, gemini, telegram = make_service()
+    repository.words = card_to_words(make_card().model_copy(update={"word": "canonical record"}))
+
+    service.handle_update(
+        {
+            "update_id": 108,
+            "message": {
+                "chat": {"id": 123, "type": "private"},
+                "text": "/search Canonical   Record",
+            },
+        }
+    )
+
+    assert gemini.calls == 0
+    assert repository.saved_cards == 0
+    assert "<b>canonical record</b>" in telegram.messages[0][1]
+
+
 def test_search_missing_word_does_not_add_it() -> None:
     service, repository, gemini, telegram = make_service()
     repository.words = card_to_words(make_card())
@@ -231,7 +286,7 @@ def test_search_missing_word_does_not_add_it() -> None:
     assert "找不到 <b>apple</b>" in telegram.messages[0][1]
 
 
-def test_search_requires_exactly_one_valid_word() -> None:
+def test_search_requires_one_valid_term() -> None:
     service, repository, gemini, telegram = make_service()
 
     service.handle_update(
@@ -243,7 +298,7 @@ def test_search_requires_exactly_one_valid_word() -> None:
 
     assert gemini.calls == 0
     assert repository.saved_cards == 0
-    assert "/search apple" in telegram.messages[0][1]
+    assert "/search canonical record" in telegram.messages[0][1]
 
 
 def test_removed_stats_command_is_not_routed() -> None:
@@ -259,7 +314,7 @@ def test_removed_stats_command_is_not_routed() -> None:
 
     assert gemini.calls == 0
     assert len(telegram.messages) == 1
-    assert "一次只傳送一個英文單字" in telegram.messages[0][1]
+    assert "英文單字或片語" in telegram.messages[0][1]
     assert "資料庫共有" not in telegram.messages[0][1]
 
 
@@ -410,7 +465,7 @@ def test_clear_confirmation_deletes_learning_data() -> None:
     assert not repository.deliveries
     assert not repository.pending
     assert telegram.removed_keyboards == [(123, 60)]
-    assert "4</b> 個單字" in telegram.messages[-1][1]
+    assert "4</b> 個詞彙" in telegram.messages[-1][1]
 
 
 def test_clear_cancellation_preserves_learning_data() -> None:

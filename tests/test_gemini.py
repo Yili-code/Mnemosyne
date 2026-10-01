@@ -40,3 +40,34 @@ def test_create_card_uses_json_schema_field(monkeypatch) -> None:
     assert "responseJsonSchema" in config
     assert "responseSchema" not in config
     assert "$defs" in config["responseJsonSchema"]
+
+
+def test_create_card_preserves_a_multi_word_term(monkeypatch) -> None:
+    term = "canonical record"
+
+    def fake_post(url, *, params, json, timeout):
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": make_card()
+                                    .model_copy(update={"word": term})
+                                    .model_dump_json()
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    card = GeminiClient("test-key", "test-model").create_card(term)
+
+    assert card.word == term

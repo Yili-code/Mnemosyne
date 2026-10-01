@@ -1,202 +1,70 @@
 # Mnemosyne
 
-> Turn one English word in Telegram into a structured Traditional Chinese vocabulary card, then
-> bring it back for recall-graded spaced repetition.
+> A self-hosted Telegram bot that turns an English word or phrase into a structured Traditional Chinese
+> vocabulary card, then brings it back for recall-graded spaced repetition.
 
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Google Cloud Run](https://img.shields.io/badge/Google_Cloud-Run-4285F4?logo=googlecloud&logoColor=white)](https://cloud.google.com/run)
 [![CI](https://github.com/Yili-code/Mnemosyne/actions/workflows/ci.yml/badge.svg)](https://github.com/Yili-code/Mnemosyne/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-[Product tour](#product-tour) · [Quick start](#quick-start) ·
-[Google Cloud deployment](DEPLOYMENT.md) · [Changelog](CHANGELOG.md) ·
-[Contributing](CONTRIBUTING.md)
+[Quick start](#quick-start) · [How to use it](#how-to-use-it) ·
+[Architecture](#architecture) · [Configuration](#configuration) ·
+[Deployment](DEPLOYMENT.md) · [Contributing](CONTRIBUTING.md)
 
-Mnemosyne is a self-hosted, single-user Telegram vocabulary learning bot. Send one English word and
-receive a Gemini-generated card with KK phonetics, Traditional Chinese definitions, usage notes,
-collocations, examples, and semantically related vocabulary. The bot stores the result and brings it
-back for recall-graded review.
+Mnemosyne is an alpha-stage, owner-only vocabulary workflow for Traditional Chinese speakers. Send
+an English word or multi-word term in a private Telegram chat; Gemini returns a schema-validated card containing
+KK phonetics, meanings, usage notes, collocations, examples, and related vocabulary. The bot stores
+the words and later asks you to grade your recall with **Hard**, **Good**, or **Easy**.
 
-The project is intentionally small, but it treats external AI, webhooks, scheduled jobs, secrets,
-and persistent state as production concerns rather than demo details.
+It is designed for:
 
-> [!IMPORTANT]
-> This repository is an alpha-stage reference implementation, not a public hosted bot. You supply
-> the Telegram, Gemini, and Google Cloud credentials and operate your own owner-only instance.
+- learners who want a private English vocabulary workflow inside Telegram;
+- developers studying a small AI-backed webhook service with durable retries and scheduled work.
 
-## Why it exists
+It is **not** a public hosted bot, a multi-user platform, or a complete dictionary. You provide and
+operate the Telegram, Gemini, and Google Cloud credentials for your own instance.
 
-A dictionary helps with recognition now; learning requires recall later. Mnemosyne connects both:
+## What it does
 
-1. Look up a word in Telegram.
-2. Generate a schema-validated learning card with Gemini.
-3. Reject low-value inflections and routine word-family derivatives.
-4. Save the headword and related vocabulary.
-5. Resurface due words and schedule the next review from explicit recall feedback.
+- Validates Gemini's structured JSON with Pydantic before saving it.
+- Filters obvious inflections and routine derivatives from related vocabulary.
+- Stores data in SQLite for local development or Firestore for Cloud Run.
+- Retries failed Gemini generations from durable storage after 15 minutes, 1 hour, 6 hours, then
+  once per day.
+- Selects only due words for review; showing a card does not count as a successful review.
+- Uses Cloud Tasks to rate-limit and retry production review delivery.
+- Rejects non-owner chats, duplicate Telegram updates, and unauthenticated task requests.
 
-## Who it is for
+## Product flow
 
-Mnemosyne is a practical fit if you are a Traditional Chinese speaker who wants a private English
-vocabulary workflow inside Telegram, or a developer studying how to make an AI-backed webhook bot
-reliable on serverless infrastructure.
-
-It is not a multi-user learning platform, a complete dictionary, or a hosted software-as-a-service
-product. Generated language content still depends on Gemini and should be checked when accuracy is
-important.
-
-## Highlights
-
-- **Structured AI output** — Pydantic validates every Gemini response before persistence.
-- **Useful related vocabulary** — deterministic rules remove plurals, tense variants, and ordinary
-  derivations that a prompt alone may still produce.
-- **Durable retry queue** — failed generations survive process restarts and retry with capped
-  backoff instead of asking the user to resend a word.
-- **Backpressured review delivery** — Cloud Tasks turns each review card into an independently
-  retried job and rate-limits Telegram delivery outside the webhook request.
-- **Recall-graded scheduling** — Hard, Good, and Easy feedback controls each word's next
-  review interval; merely displaying a word never counts as learning.
-- **Storage abstraction** — SQLite supports local development; Firestore supports stateless Cloud
-  Run deployments through the same repository contract.
-- **Idempotent delivery** — Telegram update IDs and daily-delivery records prevent duplicate work.
-- **Least-privilege deployment** — runtime credentials live in Secret Manager and Firestore access
-  comes from the Cloud Run service account.
-- **Cost-aware operation** — scale-to-zero compute, bounded concurrency, one retry item per request,
-  and documented billing controls.
-
-## Product tour
-
-These screenshots were captured from the deployed owner-only Telegram bot. They contain no bot
-token, chat ID, account name, or private conversation history.
+1. Send one English word or phrase, for example `glory` or `canonical record`.
+2. Receive a generated and validated learning card.
+3. Use `/review` or wait for the daily job, then grade your recall.
+4. Mnemosyne schedules the word's next due time from that grade.
 
 <p align="center">
-  <img src="docs/assets/telegram-vocabulary-card.png" width="420" alt="Mnemosyne Telegram vocabulary card for the word glory, with Traditional Chinese definitions, usage notes, collocations, examples, and related vocabulary">
+  <img src="docs/assets/telegram-vocabulary-card.png" width="420" alt="Telegram vocabulary card for glory with Traditional Chinese definitions, usage notes, collocations, examples, and related vocabulary">
 </p>
 
 <p align="center">
-  <img src="docs/assets/telegram-review-controls.png" width="351" alt="Mnemosyne recall review card with Hard, Good, and Easy buttons">
+  <img src="docs/assets/telegram-review-controls.png" width="351" alt="Telegram recall card with Hard, Good, and Easy buttons">
 </p>
 
-The core loop has three visible steps:
-
-1. Send one English headword, such as:
-
-```text
-meticulous
-```
-
-2. Receive a card shaped like the following. This is an illustrative output format; wording varies
-   because the content is generated by Gemini and then schema-validated.
-
-```text
-meticulous
-[məˈtɪkjələs] · adjective
-
-中文釋義
-一絲不苟的；非常仔細的
-
-用法
-常用於描述對細節極度謹慎的人或工作方式。
-
-例句
-She kept meticulous records of every transaction.
-
-相關單字
-thorough [ˈθɝo]
-徹底的 · emphasizes completeness
-The team conducted a thorough review.
-```
-
-3. When the word is due, rate your recall with **Hard**, **Good**, or **Easy**. The rating—not the
-   delivery itself—changes the next review interval.
-
-## Telegram commands
-
-| Command | Purpose |
-| --- | --- |
-| `word` | Generate and save a vocabulary card |
-| `/search apple` | Find one exact stored word without calling Gemini or writing data |
-| `/review` | Review due words and grade recall without showing examples |
-| `/words` | List every stored word, part of speech, and Chinese meaning |
-| `/clear` | Permanently clear learning data after explicit confirmation |
-| `/help` | Show in-bot usage instructions |
-
-The bot responds only to the configured owner's private chat.
-
-After deploying a version that adds or changes inline buttons, run `scripts/setup_webhook.py` again
-so Telegram includes `callback_query` updates in webhook delivery.
-
-## Architecture
-
-```text
-Telegram
-   │ signed webhook
-   ▼
-Cloud Run / FastAPI ───────► Gemini API
-   │                            │
-   │ validated card             │ transient or validation failure
-   ▼                            ▼
-Firestore ◄──────────── pending_words queue
-   │                            ▲
-   │ due vocabulary            │ every 10 minutes
-   ▼                            │
-Telegram buttons ◄──── Cloud Scheduler
-       ▲
-       └──── Cloud Tasks (one review card per task)
-```
-
-Cloud Run is ephemeral; Firestore owns durable state. Cloud Scheduler invokes protected endpoints
-for daily review and failed-word recovery. `/review` and the daily job enqueue one Cloud Task per
-card, so the original request returns before Telegram delivery begins. The queue limits dispatch
-rate and concurrency while retrying transient failures.
-
-## Reliability model
-
-Gemini failures are classified without logging credentials or full provider responses. Failed words
-are persisted and retried after 15 minutes, 1 hour, 6 hours, and then once per day until successful.
-Firestore claims use a short transactional lease so overlapping scheduler invocations do not process
-the same item concurrently.
-
-Cloud Tasks provides at-least-once delivery. Deterministic task names suppress duplicate enqueue
-attempts, but Telegram does not accept an idempotency key; an ambiguous network failure after a
-successful Telegram send can therefore produce a rare duplicate card. The queue favors recovery
-over silently losing a review.
-
-The system combines three control layers:
-
-1. **Semantic control:** Gemini selects useful related vocabulary.
-2. **Structural control:** Pydantic constrains fields, types, and lengths.
-3. **Deterministic control:** Python rules reject predictable word-family noise.
-
-This boundary matters because prompting is probabilistic; product rules should be testable.
-
-## Spaced repetition
-
-Each review card has three visible recall grades. The scheduler changes the next interval only after the user
-answers; delivery alone does not increment `review_count`.
-
-| Grade | First interval | Later behavior |
-| --- | --- | --- |
-| Hard | 1 day | Grows the previous interval slowly |
-| Good | 3 days | Multiplies the previous interval by the ease factor |
-| Easy | 7 days | Adds an ease bonus and grows the interval faster |
-
-The implementation is deliberately SM-2-inspired rather than a claim of full FSRS compatibility.
-It stores `due_at`, `interval_days`, `ease_factor`, and `lapse_count` for every word. SQLite rejects a
-second grade after the due date moves forward, while Firestore performs the same check and update in
-a transaction. This makes repeated button presses idempotent.
+These screenshots come from the deployed owner-only instance and contain no credentials, account
+name, chat ID, or unrelated conversation history.
 
 ## Quick start
 
-This path verifies the application locally. It does not make Telegram able to reach your computer;
-an interactive bot requires a public HTTPS webhook, described in [DEPLOYMENT.md](DEPLOYMENT.md).
+This path proves that the package installs and the FastAPI process starts locally. It does **not**
+connect Telegram to your computer; Telegram requires a public HTTPS webhook. Use the
+[deployment guide](DEPLOYMENT.md) for an operational bot.
 
-Requirements:
+### Requirements
 
-- Python 3.11+
-- a Telegram bot token and your numeric private-chat ID
-- a Gemini API key
-- PowerShell for the commands below
+- Python 3.11 or newer
+- Git
+- PowerShell (commands below target Windows)
+
+### 1. Install
 
 ```powershell
 git clone https://github.com/Yili-code/Mnemosyne.git
@@ -206,19 +74,24 @@ python -m venv .venv
 Copy-Item .env.example .env
 ```
 
-Fill in `.env`, then run locally:
+The placeholder `.env` is enough for the health check. Replace its values with real credentials
+before invoking Telegram, Gemini, Firestore, or protected task endpoints.
+
+### 2. Start the application
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn vocab_bot.app:app --reload
+.\.venv\Scripts\python.exe -m uvicorn vocab_bot.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-In another PowerShell window, verify the local service boundary:
+### 3. Verify the first successful run
+
+Open a second PowerShell window:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
 ```
 
-Expected response:
+Expected result:
 
 ```text
 status
@@ -226,95 +99,237 @@ status
 ok
 ```
 
-Local development defaults to SQLite. The database is created on the first workflow that stores
-data. Never commit the populated `.env` or local database.
+The `/health` endpoint proves only that the process is reachable. It does not verify the Telegram
+webhook, Gemini generation, persistence, Cloud Tasks, or scheduled delivery.
 
-To use the bot in Telegram, continue with the Google Cloud guide. It covers Firestore, Secret
-Manager, Cloud Run, Cloud Tasks, Cloud Scheduler, webhook registration, cost controls, and live
-verification rather than treating a healthy local process as proof that external integrations work.
+## How to use it
+
+After completing [DEPLOYMENT.md](DEPLOYMENT.md), open the configured bot's private chat and use:
+
+| Input | Behavior |
+| --- | --- |
+| `meticulous` or `canonical record` | Generate, validate, save, and return one vocabulary card |
+| `/search canonical record` | Read one exact saved term without writing data or calling Gemini |
+| `/review` | Send due words for recall grading |
+| `/words` | List saved words, parts of speech, and Chinese meanings |
+| `/clear` | Ask for confirmation, then delete learning and retry data |
+| `/help` | Show the in-bot instructions |
+
+One English word or multi-word term is accepted per message. Extra whitespace is normalized;
+hyphenated or apostrophized words are valid, while numbers and other punctuation are rejected. The
+bot responds only in the configured owner's private chat.
+
+If a release changes inline buttons, run the webhook setup again so Telegram continues to deliver
+`callback_query` updates:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\setup_webhook.py
+```
+
+## Architecture
+
+```text
+Telegram message
+    │  X-Telegram-Bot-Api-Secret-Token
+    ▼
+FastAPI / Cloud Run ──► VocabularyService ──► Gemini API
+                               │                    │
+                               │ validated card     │ retryable failure
+                               ▼                    ▼
+                        SQLite / Firestore ◄── pending_words
+                               │                    ▲
+                               │ due words          │ Cloud Scheduler
+                               ▼
+                         Cloud Tasks ──► Telegram review cards
+                                            │
+                                            └─ Hard / Good / Easy callback
+```
+
+### Core flows
+
+**Word generation**
+
+1. `POST /telegram/webhook` verifies Telegram's secret header.
+2. `VocabularyService.handle_update()` enforces the owner-only and duplicate-update boundaries.
+3. `GeminiClient.create_card()` requests JSON matching `VocabularyCard`.
+4. Pydantic validates the response; deterministic rules remove predictable word-family noise.
+5. The selected repository saves the input term and related vocabulary, then Telegram renders the card.
+
+**Review delivery**
+
+1. `/review` or `POST /tasks/daily-review` selects words whose `due_at` has passed.
+2. Local mode sends directly; production mode enqueues one Cloud Task per card.
+3. A Telegram callback atomically grades the word and updates its next due time.
+
+The scheduler is deliberately SM-2-inspired, not an FSRS implementation. A word's first visible
+interval is 1 day for Hard, 3 days for Good, or 7 days for Easy; later intervals use the stored ease
+factor and are capped at 365 days.
+
+**Failure recovery**
+
+1. A Gemini timeout, provider error, or invalid response creates a `pending_words` record.
+2. `POST /tasks/retry-failed` claims at most one due item using a short lease.
+3. Success saves and returns the card; failure advances the capped retry schedule.
+
+### HTTP endpoints
+
+| Endpoint | Caller | Protection | Purpose |
+| --- | --- | --- | --- |
+| `GET /health` | operator / platform | none | Process health only |
+| `POST /telegram/webhook` | Telegram | webhook secret header | Messages and callbacks |
+| `POST /tasks/daily-review` | Cloud Scheduler | `X-Cron-Secret` | Daily due-word selection |
+| `POST /tasks/retry-failed` | Cloud Scheduler | `X-Cron-Secret` | Process one failed generation |
+| `POST /tasks/send-review-card` | Cloud Tasks | `X-Cron-Secret` | Deliver one queued review card |
+
+## Project structure
+
+```text
+.
+├── src/vocab_bot/
+│   ├── app.py                # FastAPI endpoints and dependency wiring
+│   ├── config.py             # Environment parsing and validation
+│   ├── service.py            # Commands, workflows, retries, and review orchestration
+│   ├── models.py             # Pydantic generation and persistence contracts
+│   ├── gemini.py             # Structured generation and provider error boundary
+│   ├── repository.py         # Repository protocol, SQLite, and Firestore
+│   ├── review_tasks.py       # Cloud Tasks enqueueing and task deduplication
+│   ├── spaced_repetition.py  # Due selection and deterministic interval updates
+│   ├── telegram.py           # Telegram API client and HTML rendering
+│   └── word_rules.py         # Input normalization and derivative filtering
+├── scripts/setup_webhook.py  # Register Telegram message and callback updates
+├── tests/                    # Offline unit and service-level tests
+├── docs/assets/              # Sanitized Telegram screenshots
+├── DEPLOYMENT.md             # Google Cloud setup and live verification
+├── CONTRIBUTING.md           # Scope, checks, and pull-request expectations
+├── SECURITY.md               # Credential and vulnerability guidance
+├── Dockerfile                # Cloud Run container entrypoint
+└── pyproject.toml            # Package metadata, dependencies, pytest, and Ruff
+```
 
 ## Configuration
 
-| Variable | Purpose |
-| --- | --- |
-| `TELEGRAM_BOT_TOKEN` | Token issued by BotFather |
-| `TELEGRAM_OWNER_CHAT_ID` | Only private chat allowed to use the bot |
-| `TELEGRAM_WEBHOOK_SECRET` | Validates Telegram webhook requests |
-| `GEMINI_API_KEY` | Gemini API credential |
-| `GEMINI_MODEL` | Model ID used for structured generation |
-| `CRON_SECRET` | Protects scheduler endpoints |
-| `STORAGE_BACKEND` | `sqlite` locally or `firestore` in production |
-| `GOOGLE_CLOUD_PROJECT` | Firestore project when using the cloud backend |
-| `REVIEW_DELIVERY_MODE` | `direct` locally or `cloud_tasks` in production |
-| `CLOUD_RUN_SERVICE_URL` | Base URL used by queued review tasks |
-| `CLOUD_TASKS_QUEUE` | Review-delivery queue name |
-| `CLOUD_TASKS_LOCATION` | Queue region, normally the Cloud Run region |
-| `REVIEW_SIZE` | Number of words in a daily review |
-| `TIMEZONE` | Review timezone, defaulting to `Asia/Taipei` |
+Copy `.env.example` to `.env`. The populated file is ignored by Git; never place real values in
+commits, screenshots, logs, issues, or test fixtures.
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete Cloud Run, Firestore, IAM, Secret Manager,
-webhook, scheduler, billing, and troubleshooting walkthrough.
+| Variable | Required when | Default / accepted value |
+| --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | any bot workflow | no usable default |
+| `TELEGRAM_OWNER_CHAT_ID` | any bot workflow | numeric private-chat ID |
+| `TELEGRAM_WEBHOOK_SECRET` | webhook requests and setup script | no usable default |
+| `GEMINI_API_KEY` | any bot workflow | no usable default |
+| `GEMINI_MODEL` | Gemini generation | `gemini-3.5-flash-lite` |
+| `CRON_SECRET` | any bot workflow | protects all `/tasks/*` endpoints |
+| `STORAGE_BACKEND` | application workflow | `sqlite`; accepts `sqlite` or `firestore` |
+| `SQLITE_PATH` | SQLite mode | `data/vocabulary.sqlite3` |
+| `GOOGLE_CLOUD_PROJECT` | Firestore deployment; required by `cloud_tasks` mode | Google Cloud project ID |
+| `REVIEW_DELIVERY_MODE` | review delivery | `direct`; accepts `direct` or `cloud_tasks` |
+| `CLOUD_RUN_SERVICE_URL` | webhook setup or `cloud_tasks` mode | deployed HTTPS base URL |
+| `CLOUD_TASKS_QUEUE` | `cloud_tasks` mode | `mnemosyne-review` |
+| `CLOUD_TASKS_LOCATION` | `cloud_tasks` mode | `asia-east1` |
+| `REVIEW_SIZE` | review selection | `20`; integer from 1 to 50 |
+| `TIMEZONE` | daily delivery date | `Asia/Taipei`; valid IANA timezone |
 
-## Verification
+`Settings.from_env()` loads the whole runtime configuration lazily on the first non-health request.
+That is why `/health` can succeed while a bot request still fails because a credential is missing.
+
+## Development and verification
+
+Run the same offline checks expected by CI:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format --check .
+git diff --check
 ```
 
-The automated suite covers input normalization, derivative filtering, SQLite persistence, retry
-backoff, idempotency, spaced-repetition transitions, Gemini payload shape, and Telegram rendering.
-These tests do not call live Gemini, Telegram, or Google Cloud services. The deployment checklist in
-[DEPLOYMENT.md](DEPLOYMENT.md#9-production-checklist) defines the separate live evidence required
-for an operational instance.
+The test suite covers input rules, Pydantic payloads, Telegram rendering, SQLite persistence,
+retry backoff, update and delivery deduplication, review scheduling, and service orchestration. Tests
+mock external services; passing them does not prove that live credentials, IAM, webhook delivery, or
+Google Cloud resources are configured correctly.
 
-## Project status and limitations
+For a behavior change, verify the narrowest relevant layer first:
 
-- **Stage:** alpha; the package version is `0.1.0` and no stable compatibility promise is made yet.
-- **Access model:** one configured owner in one private Telegram chat.
-- **Language:** English headwords with Traditional Chinese learning content.
-- **Hosting:** local SQLite for development; Firestore is required for durable Cloud Run storage.
-- **AI boundary:** response shape and deterministic word-family rules are tested, but semantic
-  correctness still depends on the configured Gemini model.
-- **Demo:** there is no public bot or live demo because the current access model is owner-only and
-  each request can consume the operator's API quota. The product tour uses sanitized screenshots
-  captured from the deployed instance.
+1. pure rules and models;
+2. service flow with fakes;
+3. SQLite repository behavior;
+4. local FastAPI boundary;
+5. controlled live Telegram, Gemini, Firestore, Cloud Tasks, and Scheduler checks when applicable.
 
-## Project layout
+## Deployment
 
-```text
-src/vocab_bot/
-├── app.py          FastAPI endpoints and dependency wiring
-├── config.py       Environment configuration
-├── gemini.py       Structured generation and provider error boundaries
-├── models.py       Validated domain models
-├── repository.py   SQLite and Firestore implementations
-├── review_tasks.py Cloud Tasks adapter and task-level deduplication
-├── service.py      Application workflow and retry policy
-├── spaced_repetition.py  Recall grading and interval scheduling
-├── telegram.py     Telegram client and HTML rendering
-└── word_rules.py   Input and derivative filters
+Production uses Cloud Run, Firestore, Secret Manager, Cloud Tasks, Cloud Scheduler, and a Telegram
+webhook. Follow [DEPLOYMENT.md](DEPLOYMENT.md) instead of treating the local quick start as a deploy
+procedure. Its [production checklist](DEPLOYMENT.md#9-production-checklist) separates process health
+from end-to-end delivery evidence.
 
-scripts/
-└── setup_webhook.py
+Important production constraints:
 
-tests/
-└── unit and service-level behavior tests
-```
+- Cloud Run's filesystem is ephemeral; use `STORAGE_BACKEND=firestore`.
+- There is no built-in SQLite-to-Firestore migration command.
+- Store credentials in Secret Manager and grant the runtime service account only required roles.
+- Register both `message` and `callback_query` webhook updates.
+- A successful Scheduler request alone does not prove that Telegram received a review card.
 
-## Security
+## Guidance for AI coding agents
 
-Do not place real credentials in issues, logs, screenshots, or commits. Production secrets belong in
-Google Secret Manager, and the Cloud Run service account should receive only the permissions it
-needs. See [SECURITY.md](SECURITY.md) for reporting and deployment guidance.
+Before editing behavior, read files in this order:
 
-## Contributing
+1. `src/vocab_bot/app.py` for entrypoints and dependency selection;
+2. `src/vocab_bot/service.py` for user-visible workflows;
+3. `src/vocab_bot/models.py` and `repository.py` for durable contracts;
+4. the focused module and its corresponding `tests/test_*.py` file;
+5. `CONTRIBUTING.md` and `DEPLOYMENT.md` when scope or operations change.
 
-Bug reports, documentation fixes, and focused reliability improvements are welcome. Read
-[CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request; it explains the project
-scope, local checks, and the evidence expected for behavior changes.
+Preserve these invariants unless the task explicitly changes them:
+
+- one configured owner and one private Telegram chat;
+- credentials and complete provider responses never enter logs or fixtures;
+- `VocabularyCard` is validated before persistence;
+- SQLite and Firestore implement the same `Repository` contract;
+- repeated Telegram updates and review callbacks are idempotent, and repeated enqueue attempts use
+  deterministic Cloud Task names; final Telegram delivery remains at-least-once;
+- review delivery does not increment `review_count`; only a valid due-word grade does;
+- production scheduled work is durable in Firestore or Cloud Tasks, not an in-process timer;
+- unit tests stay offline and deterministic;
+- `/clear` requires explicit confirmation and deletes learning data, not update-deduplication records.
+
+When reporting verification, distinguish offline tests, local HTTP checks, and live external-service
+checks. Evidence from one boundary must not be presented as proof of another.
+
+## Known limitations and troubleshooting
+
+- **Alpha compatibility:** version `0.1.0` does not promise a stable internal API or data schema.
+- **Single-user access:** multi-user accounts, teams, and a public demo are outside the current model.
+- **Generated content:** schema and deterministic filters are tested; semantic correctness still
+  depends on the configured Gemini model.
+- **Delivery semantics:** Cloud Tasks is at-least-once. A rare ambiguous Telegram network result can
+  produce a duplicate card because Telegram does not accept an idempotency key.
+- **Storage portability:** local SQLite data is not automatically copied into Firestore.
+
+Common diagnostic boundaries:
+
+| Symptom | Check first |
+| --- | --- |
+| `/health` works but the bot is silent | Telegram webhook URL/status, secret header, then Cloud Run logs |
+| First bot request reports a missing variable | Compare `.env` with `.env.example`; `/health` does not load full settings |
+| Firestore returns permission denied | Runtime service account and `roles/datastore.user` |
+| Words disappear after a Cloud Run redeploy | Confirm production uses `STORAGE_BACKEND=firestore` |
+| Scheduler says success but no review arrives | Due words, `daily_deliveries`, Cloud Tasks, then Telegram delivery |
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete operational checklist and failure boundaries.
+
+## Contributing and project direction
+
+The current direction is reliability within the narrow owner-only workflow: clearer setup,
+reproducible bug fixes, data integrity, secure operations, and focused learning usability. Propose
+multi-user support, new infrastructure providers, or other scope expansions in an issue before
+implementation.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Security vulnerabilities
+should follow [SECURITY.md](SECURITY.md), not a public issue. Released changes are recorded in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Mnemosyne is released under the [MIT License](LICENSE).

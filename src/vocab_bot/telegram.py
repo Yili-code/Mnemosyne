@@ -103,7 +103,7 @@ def render_card(card: VocabularyCard) -> str:
         f"<b>中文釋義</b>\n{meanings}\n\n"
         f"<b>用法</b>\n{usage}{collocation_block}\n\n"
         f"<b>例句</b>\n{examples}\n\n"
-        f"<b>相關單字</b>\n{related}"
+        f"<b>相關詞彙</b>\n{related}"
     )
 
 
@@ -173,7 +173,7 @@ def clear_database_keyboard() -> dict[str, list[list[dict[str, str]]]]:
 
 def render_word_list(words: Sequence[StoredWord]) -> list[str]:
     ordered = sorted(words, key=lambda item: item.word)
-    header = f"<b>已儲存單字</b>\n共 {len(ordered)} 個"
+    header = f"<b>已儲存詞彙</b>\n共 {len(ordered)} 個"
     lines = []
     for index, item in enumerate(ordered, start=1):
         meaning = "；".join(html.escape(value) for value in item.meanings_zh)
@@ -182,7 +182,7 @@ def render_word_list(words: Sequence[StoredWord]) -> list[str]:
         lines.append(f"<b>{index}. {html.escape(item.word)}</b> · <i>{parts}</i> · {meaning}")
 
     if not lines:
-        return [f"{header}\n\n目前尚未儲存任何單字。"]
+        return [f"{header}\n\n目前尚未儲存任何詞彙。"]
     return _chunk_lines(header, lines)
 
 
@@ -203,16 +203,16 @@ def _chunk_lines(header: str, lines: Sequence[str]) -> list[str]:
 
 
 HELP_TEXT = """<b>Mnemosyne</b>
-直接傳送一個英文單字，我會回覆：
+直接傳送一個英文單字或片語，我會回覆：
 • 中文意思與實際用法
 • 自然例句
 • 常見搭配
-• TOEIC、IELTS 或日常英文中實用的相關單字
-(普通複數、時態與常規衍生詞不會列入相關單字)
+• TOEIC、IELTS 或日常英文中實用的相關詞彙
+(普通複數、時態與常規衍生詞不會列入相關詞彙)
 
 指令：
 /help — 顯示說明
-/search apple — 搜尋已儲存單字，不新增資料
-/words — 列出所有已儲存單字
-/review — 複習目前到期的單字，並依記憶程度安排下次複習
+/search canonical record — 搜尋已儲存詞彙，不新增資料
+/words — 列出所有已儲存詞彙
+/review — 複習目前到期的詞彙，並依記憶程度安排下次複習
 /clear — 經過確認後清空所有學習資料"""

@@ -90,14 +90,14 @@ class VocabularyService:
             if word is None:
                 self.telegram.send_message(
                     chat_id,
-                    "請輸入一個英文單字，例如：<code>/search apple</code>。",
+                    "請輸入英文單字或片語，例如：<code>/search canonical record</code>。",
                 )
                 return
             stored = self.repository.get_word(word)
             if stored is None:
                 self.telegram.send_message(
                     chat_id,
-                    f"資料庫中找不到 <b>{word}</b>。此指令不會新增單字。",
+                    f"資料庫中找不到 <b>{word}</b>。此指令不會新增詞彙。",
                 )
                 return
             self.telegram.send_message(chat_id, render_search_result(stored))
@@ -113,7 +113,7 @@ class VocabularyService:
             count = len(self.repository.list_words())
             self.telegram.send_message(
                 chat_id,
-                f"即將永久刪除 <b>{count}</b> 個單字，以及複習、每日傳送與失敗重試狀態。"
+                f"即將永久刪除 <b>{count}</b> 個詞彙，以及複習、每日傳送與失敗重試狀態。"
                 "此操作無法復原。",
                 reply_markup=clear_database_keyboard(),
             )
@@ -123,7 +123,8 @@ class VocabularyService:
         if word is None:
             self.telegram.send_message(
                 chat_id,
-                "請一次只傳送一個英文單字，例如：<code>leverage</code>。",
+                "請傳送一個英文單字或片語，例如：<code>leverage</code> 或 "
+                "<code>canonical record</code>。",
             )
             return
 
@@ -192,7 +193,7 @@ class VocabularyService:
                 callback_id=callback_id,
                 chat_id=chat_id,
                 message_id=message_id,
-                text="這個單字已評分或尚未到期。",
+                text="這個詞彙已評分或尚未到期。",
             )
             return
 
@@ -232,7 +233,7 @@ class VocabularyService:
         try:
             self.telegram.send_message(
                 chat_id,
-                f"資料庫已清空：刪除 <b>{counts['words']}</b> 個單字、"
+                f"資料庫已清空：刪除 <b>{counts['words']}</b> 個詞彙、"
                 f"<b>{counts['pending_words']}</b> 個待重試項目與 "
                 f"<b>{counts['deliveries']}</b> 筆每日傳送紀錄。",
             )
@@ -312,7 +313,7 @@ class VocabularyService:
         if not chosen:
             self.telegram.send_message(
                 self.owner_chat_id,
-                "目前沒有到期的單字。新的單字會依你的評分安排下次複習。",
+                "目前沒有到期的詞彙。新的詞彙會依你的評分安排下次複習。",
             )
             return []
 

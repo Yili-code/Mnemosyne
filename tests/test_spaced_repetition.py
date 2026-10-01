@@ -3,7 +3,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from vocab_bot.models import StoredWord
-from vocab_bot.spaced_repetition import ReviewGrade, schedule_review, select_due_words
+from vocab_bot.spaced_repetition import (
+    ReviewGrade,
+    decode_review_callback,
+    encode_review_callback,
+    schedule_review,
+    select_due_words,
+)
 
 
 @pytest.mark.parametrize(
@@ -70,3 +76,10 @@ def test_due_selection_excludes_future_words_and_orders_oldest_first() -> None:
     selected = select_due_words(words, now=now, limit=10)
 
     assert [item.word for item in selected] == ["old", "today"]
+
+
+def test_review_callback_preserves_a_multi_word_term() -> None:
+    callback = encode_review_callback("canonical record", ReviewGrade.GOOD)
+
+    assert len(callback.encode()) <= 64
+    assert decode_review_callback(callback) == ("canonical record", ReviewGrade.GOOD)

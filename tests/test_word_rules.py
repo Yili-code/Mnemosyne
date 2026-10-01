@@ -13,11 +13,17 @@ def related(word: str, *, exceptional: bool = False, reason: str | None = None) 
     )
 
 
-def test_normalize_accepts_one_word_only() -> None:
+def test_normalize_accepts_words_and_multi_word_terms() -> None:
     assert normalize_input("  Leverage ") == "leverage"
     assert normalize_input("follow-up") == "follow-up"
-    assert normalize_input("two words") is None
+    assert normalize_input("  Canonical   Record ") == "canonical record"
+    assert normalize_input("state-of-the-art solution") == "state-of-the-art solution"
+
+
+def test_normalize_rejects_non_english_terms_and_overlong_input() -> None:
     assert normalize_input("word123") is None
+    assert normalize_input("canonical record!") is None
+    assert normalize_input("a" * 51) is None
 
 
 def test_detects_common_inflections_and_derivations() -> None:

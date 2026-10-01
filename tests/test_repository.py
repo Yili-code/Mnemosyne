@@ -50,6 +50,16 @@ def test_sqlite_saves_headword_and_related_words(tmp_path: Path) -> None:
     assert words["utilize"].source_word == "leverage"
 
 
+def test_sqlite_saves_and_finds_a_multi_word_term(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "words.sqlite3")
+    repository.save_card(make_card().model_copy(update={"word": "canonical record"}))
+
+    stored = repository.get_word("canonical record")
+
+    assert stored is not None
+    assert stored.word == "canonical record"
+
+
 def test_claim_update_is_idempotent(tmp_path: Path) -> None:
     repository = SQLiteRepository(tmp_path / "words.sqlite3")
     assert repository.claim_update(42) is True

@@ -21,12 +21,12 @@ def test_render_card_has_learning_sections_but_no_exam_labels() -> None:
     assert "[ˈlɛvərɪdʒ]" in rendered
     assert "用法" in rendered
     assert "例句" in rendered
-    assert "相關單字" in rendered
+    assert "相關詞彙" in rendered
     assert "TOEIC" not in rendered
     assert "IELTS" not in rendered
     assert "📘" not in rendered
     assert "我們善用資源" not in rendered
-    assert "\n\n<b>相關單字</b>\n" in rendered
+    assert "\n\n<b>相關詞彙</b>\n" in rendered
 
 
 def test_review_prompt_has_grade_buttons_but_no_example() -> None:
