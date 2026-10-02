@@ -18,7 +18,6 @@ from vocab_bot.spaced_repetition import (
         (ReviewGrade.AGAIN, 10 / (24 * 60)),
         (ReviewGrade.HARD, 1.0),
         (ReviewGrade.GOOD, 3.0),
-        (ReviewGrade.EASY, 7.0),
     ],
 )
 def test_first_review_uses_learning_intervals(grade: ReviewGrade, expected_days: float) -> None:
@@ -30,6 +29,14 @@ def test_first_review_uses_learning_intervals(grade: ReviewGrade, expected_days:
     assert reviewed.review_count == 1
     assert reviewed.interval_days == pytest.approx(expected_days)
     assert reviewed.due_at == now + timedelta(days=expected_days)
+
+
+def test_easy_is_not_a_scheduled_review() -> None:
+    now = datetime(2026, 9, 26, tzinfo=UTC)
+    word = StoredWord(word="leverage", meanings_zh=["善用"], due_at=now)
+
+    with pytest.raises(ValueError, match="remove the word"):
+        schedule_review(word, ReviewGrade.EASY, reviewed_at=now)
 
 
 def test_again_records_lapse_and_reduces_ease() -> None:

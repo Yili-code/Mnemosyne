@@ -196,7 +196,7 @@ Cloud Run、Firestore、Cloud Scheduler 與 Gemini 各自有不同的免費額�
 - 傳送單字後收到完整卡片
 - Firestore 同時保存主單字與相關獨立單字
 - 同一 Telegram update retry 不會重複處理
-- Force run 收到 daily review，按下 Hard／Good／Easy 後按鈕消失並顯示下次間隔
+- Force run 收到 daily review；Hard／Good 顯示下次間隔，Easy 移除該詞彙
 - `/review` webhook 在數秒內回應，Cloud Tasks 隨後逐張送出卡片
 - 同一天正常 scheduler retry 不會重複發送
 - Gemini 失敗時 Firestore 出現 `pending_words`，retry job 成功後該文件消失

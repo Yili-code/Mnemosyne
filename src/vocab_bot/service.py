@@ -10,6 +10,7 @@ from vocab_bot.repository import Repository
 from vocab_bot.review_tasks import ReviewTaskQueue
 from vocab_bot.spaced_repetition import (
     GRADE_LABELS,
+    ReviewGrade,
     decode_review_callback,
     describe_interval,
 )
@@ -216,13 +217,17 @@ class VocabularyService:
             )
             return
 
-        label = GRADE_LABELS[grade]
-        interval = describe_interval(reviewed.interval_days)
+        if grade is ReviewGrade.EASY:
+            text = "Easy：已從單字庫移除。"
+        else:
+            label = GRADE_LABELS[grade]
+            interval = describe_interval(reviewed.interval_days)
+            text = f"{label}：{interval}後可再次出現。"
         self._finish_review_callback(
             callback_id=callback_id,
             chat_id=chat_id,
             message_id=message_id,
-            text=f"{label}：{interval}後可再次出現。",
+            text=text,
         )
 
     def _handle_clear_callback(

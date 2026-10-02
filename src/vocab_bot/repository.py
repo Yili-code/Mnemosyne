@@ -166,6 +166,9 @@ class SQLiteRepository:
             item = StoredWord.model_validate_json(row[0])
             if not is_due(item, reviewed_at):
                 return None
+            if grade is ReviewGrade.EASY:
+                self.connection.execute("DELETE FROM words WHERE word = ?", (word,))
+                return item
             scheduled = schedule_review(item, grade, reviewed_at=reviewed_at)
             self.connection.execute(
                 "UPDATE words SET payload = ? WHERE word = ?",
@@ -302,6 +305,9 @@ class FirestoreRepository:
             item = StoredWord.model_validate(snapshot.to_dict())
             if not is_due(item, reviewed_at):
                 return None
+            if grade is ReviewGrade.EASY:
+                current_transaction.delete(ref)
+                return item
             scheduled = schedule_review(item, grade, reviewed_at=reviewed_at)
             current_transaction.set(ref, scheduled.model_dump(mode="json"))
             return scheduled

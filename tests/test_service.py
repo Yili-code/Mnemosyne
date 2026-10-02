@@ -43,6 +43,8 @@ class FakeRepository:
     ) -> StoredWord | None:
         for index, item in enumerate(self.words):
             if item.word == word and item.due_at <= reviewed_at:
+                if grade is ReviewGrade.EASY:
+                    return self.words.pop(index)
                 reviewed = schedule_review(item, grade, reviewed_at=reviewed_at)
                 self.words[index] = reviewed
                 return reviewed
@@ -531,7 +533,7 @@ def test_clear_cancellation_preserves_learning_data() -> None:
     assert telegram.removed_keyboards == [(123, 61)]
 
 
-def test_expired_callback_ack_does_not_hide_a_successful_grade() -> None:
+def test_easy_review_removes_word_even_when_callback_ack_expires() -> None:
     service, repository, _, _ = make_service()
     telegram = CallbackAckFailingTelegram()
     service.telegram = telegram
@@ -552,10 +554,32 @@ def test_expired_callback_ack_does_not_hide_a_successful_grade() -> None:
         }
     )
 
-    reviewed = next(item for item in repository.words if item.word == "leverage")
-    assert reviewed.review_count == 1
-    assert reviewed.interval_days == 7
+    assert repository.get_word("leverage") is None
     assert telegram.removed_keyboards == [(123, 56)]
+
+
+def test_easy_review_removes_word_and_reports_completion() -> None:
+    service, repository, _, telegram = make_service()
+    repository.words = card_to_words(make_card())
+
+    service.handle_update(
+        {
+            "update_id": 203,
+            "callback_query": {
+                "id": "easy-callback",
+                "from": {"id": 123},
+                "data": "review:e:leverage",
+                "message": {
+                    "message_id": 57,
+                    "chat": {"id": 123, "type": "private"},
+                },
+            },
+        }
+    )
+
+    assert repository.get_word("leverage") is None
+    assert telegram.callback_answers == [("easy-callback", "Easy：已從單字庫移除。")]
+    assert telegram.removed_keyboards == [(123, 57)]
 
 
 def test_gemini_failure_is_saved_for_automatic_retry() -> None:

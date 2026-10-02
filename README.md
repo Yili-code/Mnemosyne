@@ -45,7 +45,7 @@ The screenshots below are from the real deployed workflow. They demonstrate that
 1. Send one English word or phrase, for example `glory` or `canonical record`.
 2. Receive a generated and validated learning card.
 3. Use `/review` or wait for the daily job, then grade your recall.
-4. Mnemosyne schedules the word's next due time from that grade.
+4. Mnemosyne schedules the next due time for Hard or Good; Easy removes the mastered word.
 
 <p align="center">
   <img src="docs/assets/telegram-vocabulary-card.png" width="420" alt="Telegram vocabulary card for glory with Traditional Chinese definitions, usage notes, collocations, examples, and related vocabulary">
@@ -166,11 +166,11 @@ FastAPI / Cloud Run ──► VocabularyService ──► Gemini API
 
 1. `/review` or `POST /tasks/daily-review` selects words whose `due_at` has passed.
 2. Local mode sends directly; production mode enqueues one Cloud Task per card.
-3. A Telegram callback atomically grades the word and updates its next due time.
+3. A Telegram callback atomically updates the next due time, or deletes the word for Easy.
 
 The scheduler is deliberately SM-2-inspired, not an FSRS implementation. A word's first visible
-interval is 1 day for Hard, 3 days for Good, or 7 days for Easy; later intervals use the stored ease
-factor and are capped at 365 days.
+interval is 1 day for Hard or 3 days for Good; later intervals use the stored ease factor and are
+capped at 365 days. Easy means mastered and permanently removes that word from storage.
 
 **Failure recovery**
 
@@ -296,7 +296,8 @@ Preserve these invariants unless the task explicitly changes them:
 - SQLite and Firestore implement the same `Repository` contract;
 - repeated Telegram updates and review callbacks are idempotent, and repeated enqueue attempts use
   deterministic Cloud Task names; final Telegram delivery remains at-least-once;
-- review delivery does not increment `review_count`; only a valid due-word grade does;
+- review delivery does not increment `review_count`; Hard and Good reschedule a valid due word,
+  while Easy deletes it;
 - production scheduled work is durable in Firestore or Cloud Tasks, not an in-process timer;
 - unit tests stay offline and deterministic;
 - `/clear` requires explicit confirmation and deletes learning data, not update-deduplication records.

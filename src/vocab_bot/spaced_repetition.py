@@ -53,7 +53,8 @@ def schedule_review(item: StoredWord, grade: ReviewGrade, *, reviewed_at: dateti
     """Return the next deterministic review state for a recalled word.
 
     This is an intentionally small SM-2-inspired scheduler. The interval is driven by
-    explicit recall quality instead of treating delivery as successful learning.
+    explicit recall quality instead of treating delivery as successful learning. Easy
+    is handled by the repository because it removes the word instead of rescheduling it.
     """
     reviewed_at = _utc(reviewed_at)
     ease = item.ease_factor
@@ -71,9 +72,7 @@ def schedule_review(item: StoredWord, grade: ReviewGrade, *, reviewed_at: dateti
         interval = 3.0 if item.review_count == 0 else max(1.0, previous_interval * ease)
         lapse_count = item.lapse_count
     else:
-        interval = 7.0 if item.review_count == 0 else max(2.0, previous_interval * ease * 1.3)
-        ease += 0.15
-        lapse_count = item.lapse_count
+        raise ValueError("Easy reviews remove the word instead of scheduling it")
 
     interval = min(interval, MAX_INTERVAL_DAYS)
     ease = min(MAX_EASE_FACTOR, max(MIN_EASE_FACTOR, ease))

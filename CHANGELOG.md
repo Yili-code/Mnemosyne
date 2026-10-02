@@ -13,7 +13,7 @@ Initial public alpha.
   Gemini.
 - Save headwords and useful related vocabulary while filtering routine grammatical and word-family
   derivatives.
-- Review due words with Hard, Good, and Easy recall grades using an SM-2-inspired scheduler.
+- Review due words with an SM-2-inspired scheduler; Easy removes mastered words from storage.
 - Search one stored word without generating content or changing learning data.
 - List saved words and clear learning data through an explicit owner-only confirmation flow.
 

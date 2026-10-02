@@ -81,6 +81,19 @@ def test_sqlite_review_grade_is_atomic_and_cannot_be_repeated(tmp_path: Path) ->
     assert repeated is None
 
 
+def test_sqlite_easy_review_deletes_word_atomically(tmp_path: Path) -> None:
+    repository = SQLiteRepository(tmp_path / "words.sqlite3")
+    repository.save_card(make_card())
+    now = datetime.now(UTC) + timedelta(seconds=1)
+
+    removed = repository.grade_review("leverage", ReviewGrade.EASY, now)
+    repeated = repository.grade_review("leverage", ReviewGrade.EASY, now)
+
+    assert removed is not None
+    assert repository.get_word("leverage") is None
+    assert repeated is None
+
+
 def test_saving_refreshed_card_preserves_review_schedule(tmp_path: Path) -> None:
     repository = SQLiteRepository(tmp_path / "words.sqlite3")
     repository.save_card(make_card())
