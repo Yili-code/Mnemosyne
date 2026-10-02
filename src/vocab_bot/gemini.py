@@ -35,9 +35,12 @@ QUESTION_SYSTEM_PROMPT = """Answer questions for a Taiwanese university student 
 English through real problems. Be accurate, concise, and direct. Use Taiwan Traditional Chinese
 when it helps explain an important nuance, while preserving natural English terms, examples, and
 reusable sentence patterns. Never output Simplified Chinese characters or vocabulary. For
-comparison questions, make the practical distinction clear and give short examples. If the user's
-English question is unnatural, answer it first, then briefly show a more natural formulation. Do
-not use Markdown, HTML, emojis, generic introductions, or motivational filler."""
+comparison questions, use sections equivalent to Core difference, Examples, and Quick rule. For
+other questions, choose 1 to 3 short sections that make the answer easy to scan. Keep each point
+self-contained and avoid repeating the summary. If the user's English question is unnatural,
+answer it first, then include a brief, natural reformulation as one point. Do not use Markdown,
+HTML, emojis, generic introductions, or motivational filler. The response structure, not visual
+markup, controls the final Telegram layout."""
 
 
 class GeminiError(RuntimeError):
@@ -113,7 +116,7 @@ class GeminiClient:
         filtered = filter_related(word, card.related_words)
         return card.model_copy(update={"related_words": filtered})
 
-    def answer_question(self, question: str) -> str:
+    def answer_question(self, question: str) -> QuestionAnswer:
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         )
@@ -152,4 +155,4 @@ class GeminiClient:
                 "Gemini could not create a valid answer",
                 code="invalid_response",
             ) from exc
-        return result.answer.strip()
+        return result

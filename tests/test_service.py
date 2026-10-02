@@ -1,7 +1,14 @@
 from datetime import UTC, datetime, timedelta
 
 from vocab_bot.gemini import GeminiError
-from vocab_bot.models import DailyDelivery, PendingWord, ReviewTaskPayload, StoredWord
+from vocab_bot.models import (
+    AnswerSection,
+    DailyDelivery,
+    PendingWord,
+    QuestionAnswer,
+    ReviewTaskPayload,
+    StoredWord,
+)
 from vocab_bot.repository import card_to_words
 from vocab_bot.service import VocabularyService
 from vocab_bot.spaced_repetition import ReviewGrade, schedule_review, select_due_words
@@ -91,10 +98,22 @@ class FakeGemini:
         assert word == "leverage"
         return make_card()
 
-    def answer_question(self, question: str) -> str:
+    def answer_question(self, question: str) -> QuestionAnswer:
         self.calls += 1
         assert question == "What's the difference between assignment and homework?"
-        return "An assignment is a specific task; homework is work done outside class."
+        return QuestionAnswer(
+            title="Assignment vs. homework",
+            summary="Both describe required work.",
+            sections=[
+                AnswerSection(
+                    heading="Core difference",
+                    points=[
+                        "An assignment is a specific task.",
+                        "Homework is work done outside class.",
+                    ],
+                )
+            ],
+        )
 
 
 class PhraseGemini(FakeGemini):
@@ -324,7 +343,9 @@ def test_ask_answers_question_without_saving_vocabulary() -> None:
     assert gemini.calls == 1
     assert repository.saved_cards == 0
     assert not repository.words
-    assert "An assignment is a specific task" in telegram.messages[0][1]
+    rendered = telegram.messages[0][1]
+    assert rendered.startswith("<b>Assignment vs. homework</b>\n\n")
+    assert "<b>Core difference</b>\n• An assignment is a specific task." in rendered
 
 
 def test_ask_requires_a_question_without_calling_gemini() -> None:

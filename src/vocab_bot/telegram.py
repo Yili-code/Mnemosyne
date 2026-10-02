@@ -5,7 +5,7 @@ from collections.abc import Sequence
 
 import httpx
 
-from vocab_bot.models import StoredWord, VocabularyCard
+from vocab_bot.models import QuestionAnswer, StoredWord, VocabularyCard
 from vocab_bot.spaced_repetition import ReviewGrade, encode_review_callback
 from vocab_bot.traditional_chinese import to_taiwan_traditional
 
@@ -143,8 +143,19 @@ def render_search_result(item: StoredWord) -> str:
     return "\n\n".join(sections)
 
 
-def render_question_answer(answer: str) -> str:
-    return html.escape(answer.strip())
+def render_question_answer(answer: QuestionAnswer) -> str:
+    sections = []
+    for section in answer.sections:
+        points = "\n".join(f"• {html.escape(point)}" for point in section.points)
+        sections.append(f"<b>{html.escape(section.heading)}</b>\n{points}")
+
+    return "\n\n".join(
+        [
+            f"<b>{html.escape(answer.title)}</b>",
+            html.escape(answer.summary),
+            *sections,
+        ]
+    )
 
 
 def review_keyboard(word: str) -> dict[str, list[list[dict[str, str]]]]:

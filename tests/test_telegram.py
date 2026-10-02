@@ -1,6 +1,7 @@
 import httpx
 import pytest
 
+from vocab_bot.models import AnswerSection, QuestionAnswer
 from vocab_bot.repository import card_to_words
 from vocab_bot.telegram import (
     HELP_TEXT,
@@ -91,10 +92,27 @@ def test_search_result_renders_the_stored_content() -> None:
     assert "We can leverage this tool." in rendered
 
 
-def test_question_answer_escapes_gemini_output() -> None:
-    rendered = render_question_answer("Use A < B & B > C")
+def test_question_answer_has_scannable_sections_and_escapes_gemini_output() -> None:
+    rendered = render_question_answer(
+        QuestionAnswer(
+            title="A < B",
+            summary="Use A & B precisely.",
+            sections=[
+                AnswerSection(
+                    heading="Core difference",
+                    points=["A > C", "B < C"],
+                )
+            ],
+        )
+    )
 
-    assert rendered == "Use A &lt; B &amp; B &gt; C"
+    assert rendered == (
+        "<b>A &lt; B</b>\n\n"
+        "Use A &amp; B precisely.\n\n"
+        "<b>Core difference</b>\n"
+        "• A &gt; C\n"
+        "• B &lt; C"
+    )
 
 
 def test_send_message_converts_simplified_chinese_before_delivery(monkeypatch) -> None:

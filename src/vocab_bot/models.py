@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -48,10 +49,19 @@ class VocabularyCard(BaseModel):
         return " ".join(value.lower().split())
 
 
+class AnswerSection(BaseModel):
+    heading: str = Field(min_length=1, max_length=60)
+    points: list[Annotated[str, Field(min_length=1, max_length=240)]] = Field(
+        min_length=1, max_length=3
+    )
+
+
 class QuestionAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    answer: str = Field(min_length=1, max_length=3000)
+    title: str = Field(min_length=1, max_length=80)
+    summary: str = Field(min_length=1, max_length=500)
+    sections: list[AnswerSection] = Field(min_length=1, max_length=3)
 
 
 class StoredWord(BaseModel):

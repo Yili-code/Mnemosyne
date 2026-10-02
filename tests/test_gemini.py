@@ -129,8 +129,11 @@ def test_answer_question_uses_structured_output(monkeypatch) -> None:
                         "content": {
                             "parts": [
                                 {
-                                    "text": '{"answer":"An assignment is a specific task; '
-                                    'homework is work done outside class."}'
+                                    "text": '{"title":"Assignment vs. homework",'
+                                    '"summary":"Both describe required work.",'
+                                    '"sections":[{"heading":"Core difference",'
+                                    '"points":["An assignment is any assigned task.",'
+                                    '"Homework is completed outside class."]}]}'
                                 }
                             ]
                         }
@@ -145,6 +148,7 @@ def test_answer_question_uses_structured_output(monkeypatch) -> None:
         "What's the difference between assignment and homework?"
     )
 
-    assert answer.startswith("An assignment")
+    assert answer.title == "Assignment vs. homework"
+    assert answer.sections[0].heading == "Core difference"
     assert captured["contents"][0]["parts"][0]["text"].startswith("What's the difference")
     assert "responseJsonSchema" in captured["generationConfig"]
