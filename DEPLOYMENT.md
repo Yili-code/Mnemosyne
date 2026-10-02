@@ -89,7 +89,7 @@ Cloud Run 使用的 service account 必須具備：
 將 `YOUR_CHAT_ID` 與 `YOUR_PROJECT_ID` 換成真實值：
 
 ```powershell
-gcloud run deploy mnemosyne --source . --region asia-east1 --allow-unauthenticated --min-instances 0 --max-instances 1 --memory 512Mi --timeout 60 --set-env-vars "STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,TELEGRAM_OWNER_CHAT_ID=YOUR_CHAT_ID,GEMINI_MODEL=gemini-3.5-flash-lite,REVIEW_SIZE=20,TIMEZONE=Asia/Taipei" --set-secrets "TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,GEMINI_API_KEY=gemini-api-key:latest,CRON_SECRET=cron-secret:latest"
+gcloud run deploy mnemosyne --source . --region asia-east1 --allow-unauthenticated --min-instances 0 --max-instances 1 --memory 512Mi --timeout 60 --set-env-vars "STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,TELEGRAM_OWNER_CHAT_ID=YOUR_CHAT_ID,GEMINI_MODEL=gemini-3.5-flash-lite,REVIEW_SIZE=10,TIMEZONE=Asia/Taipei" --set-secrets "TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,GEMINI_API_KEY=gemini-api-key:latest,CRON_SECRET=cron-secret:latest"
 ```
 
 先建立 review queue。單一 concurrency 保留卡片順序，每秒兩張避免瞬間送出整批：

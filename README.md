@@ -233,7 +233,7 @@ commits, screenshots, logs, issues, or test fixtures.
 | `CLOUD_RUN_SERVICE_URL` | webhook setup or `cloud_tasks` mode | deployed HTTPS base URL |
 | `CLOUD_TASKS_QUEUE` | `cloud_tasks` mode | `mnemosyne-review` |
 | `CLOUD_TASKS_LOCATION` | `cloud_tasks` mode | `asia-east1` |
-| `REVIEW_SIZE` | review selection | `20`; integer from 1 to 50 |
+| `REVIEW_SIZE` | review selection | `10`; integer from 1 to 50 |
 | `TIMEZONE` | daily delivery date | `Asia/Taipei`; valid IANA timezone |
 
 `Settings.from_env()` loads the whole runtime configuration lazily on the first non-health request.

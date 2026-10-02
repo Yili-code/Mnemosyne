@@ -47,7 +47,7 @@ class Settings:
             raise RuntimeError(
                 "GOOGLE_CLOUD_PROJECT and CLOUD_RUN_SERVICE_URL are required for cloud_tasks"
             )
-        review_size = int(os.getenv("REVIEW_SIZE", "20"))
+        review_size = int(os.getenv("REVIEW_SIZE", "10"))
         if not 1 <= review_size <= 50:
             raise RuntimeError("REVIEW_SIZE must be between 1 and 50")
         return cls(
