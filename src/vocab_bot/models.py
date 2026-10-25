@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -99,9 +99,23 @@ class DailyDelivery(BaseModel):
     sent_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class ReviewBatch(BaseModel):
+    id: str = Field(pattern=r"^[a-f0-9]{24}$")
+    items: list[StoredWord] = Field(min_length=1, max_length=5)
+    created_at: datetime
+    expires_at: datetime
+    stage: Literal["prompt", "revealed", "completed"] = "prompt"
+    unfamiliar: list[int] = Field(default_factory=list)
+    revision: int = Field(default=0, ge=0)
+    remembered_count: int = 0
+    unfamiliar_count: int = 0
+    skipped_count: int = 0
+
+
 class ReviewTaskPayload(BaseModel):
     chat_id: int
     item: StoredWord
+    batch_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{24}$")
 
 
 class PendingWord(BaseModel):

@@ -13,7 +13,8 @@
 Mnemosyne is an alpha-stage, owner-only vocabulary workflow for Traditional Chinese speakers. Send
 an English word or multi-word term in a private Telegram chat; Gemini returns a schema-validated card containing
 KK phonetics, meanings, usage notes, collocations, examples, and related vocabulary. The bot stores
-the words and later asks you to grade your recall with **Hard**, **Good**, or **Easy**.
+the words and later presents groups of up to five expressions for recall. Reveal the answers,
+mark only unfamiliar expressions, and confirm the group once.
 
 It is designed for:
 
@@ -44,14 +45,16 @@ The screenshots below are from the real deployed workflow. They demonstrate that
 
 1. Send one English word or phrase, for example `glory` or `canonical record`.
 2. Receive a generated and validated learning card.
-3. Use `/review` or wait for the daily job, then grade your recall.
-4. Mnemosyne schedules the next due time for Hard or Good; Easy removes the mastered word.
+3. Use `/review` or wait for the daily job; recall the meanings of up to five English expressions.
+4. Reveal the answers together, mark only forgotten or uncertain expressions, then complete the group.
+   Only completion updates the schedule; it never removes a word.
 
 <p align="center">
   <img src="docs/assets/telegram-vocabulary-card.png" width="420" alt="Telegram vocabulary card for glory with Traditional Chinese definitions, usage notes, collocations, examples, and related vocabulary">
 </p>
 
 <p align="center">
+  <em>Historical single-card controls; new reviews use the grouped flow described above.</em><br>
   <img src="docs/assets/telegram-review-controls.png" width="351" alt="Telegram recall card with Hard, Good, and Easy buttons">
 </p>
 
@@ -117,7 +120,7 @@ After completing [DEPLOYMENT.md](DEPLOYMENT.md), open the configured bot's priva
 | `meticulous` or `canonical record` | Generate, validate, save, and return one vocabulary card |
 | `/ask What's the difference between assignment and homework?` | Ask a question through Gemini without saving it as vocabulary |
 | `/search canonical record` | Read one exact saved term without writing data or calling Gemini |
-| `/review` | Send due words for recall grading |
+| `/review` | Send due expressions in groups of up to five |
 | `/words` | List saved words, parts of speech, and Chinese meanings |
 | `/clear` | Ask for confirmation, then delete learning and retry data |
 | `/help` | Show the in-bot instructions |
@@ -147,9 +150,9 @@ FastAPI / Cloud Run ──► VocabularyService ──► Gemini API
                                │                    ▲
                                │ due words          │ Cloud Scheduler
                                ▼
-                         Cloud Tasks ──► Telegram review cards
+                         Cloud Tasks ──► Telegram review groups
                                             │
-                                            └─ Hard / Good / Easy callback
+                                            └─ Reveal / mark / complete
 ```
 
 ### Core flows
@@ -165,12 +168,24 @@ FastAPI / Cloud Run ──► VocabularyService ──► Gemini API
 **Review delivery**
 
 1. `/review` or `POST /tasks/daily-review` selects words whose `due_at` has passed.
-2. Local mode sends directly; production mode enqueues one Cloud Task per card.
-3. A Telegram callback atomically updates the next due time, or deletes the word for Easy.
+2. Groups contain at most five expressions. `REVIEW_SIZE` still limits the total due-word selection;
+   the default 20 produces at most four group messages. Production enqueues one Cloud Task per group.
+3. Each message starts with English expressions only. Reveal all meanings, then toggle only the
+   unfamiliar expressions. Revealing and selecting do not change learning progress.
+4. Completing a revealed group atomically saves its result and all eligible word schedules.
+   Unmarked expressions receive Good (initially 3 days); unfamiliar expressions receive Again
+   (10 minutes). No word is deleted. A due time is eligibility for the next `/review` or daily run,
+   not a promise of another notification in 10 minutes.
 
-The scheduler is deliberately SM-2-inspired, not an FSRS implementation. A word's first visible
-interval is 1 day for Hard or 3 days for Good; later intervals use the stored ease factor and are
-capped at 365 days. Easy means mastered and permanently removes that word from storage.
+Batch sessions are durable in SQLite or Firestore (`review_batches`). They expire after seven days;
+expired or cleared sessions cannot grade words. Stale learning snapshots are skipped, and callback
+replays cannot complete a group twice, even after the next due time. Sessions remain stored until
+`/clear`; expiry does not currently prune storage. Short answer previews are bounded to Telegram's
+message limit; `/search` still provides the saved detail.
+
+The scheduler is deliberately SM-2-inspired, not an FSRS implementation. Good intervals use the
+stored ease factor after the first review and are capped at 365 days. Tasks and Hard/Good/Easy
+callbacks from before this change remain compatible; an old Easy button still deletes its word.
 
 **Failure recovery**
 
@@ -186,7 +201,7 @@ capped at 365 days. Easy means mastered and permanently removes that word from s
 | `POST /telegram/webhook` | Telegram | webhook secret header | Messages and callbacks |
 | `POST /tasks/daily-review` | Cloud Scheduler | `X-Cron-Secret` | Daily due-word selection |
 | `POST /tasks/retry-failed` | Cloud Scheduler | `X-Cron-Secret` | Process one failed generation |
-| `POST /tasks/send-review-card` | Cloud Tasks | `X-Cron-Secret` | Deliver one queued review card |
+| `POST /tasks/send-review-card` | Cloud Tasks | `X-Cron-Secret` | Deliver one queued review group (legacy cards accepted) |
 
 ## Project structure
 
@@ -199,6 +214,8 @@ capped at 365 days. Easy means mastered and permanently removes that word from s
 │   ├── models.py             # Pydantic generation and persistence contracts
 │   ├── gemini.py             # Structured generation and provider error boundary
 │   ├── repository.py         # Repository protocol, SQLite, and Firestore
+│   ├── batch_review.py       # Group transitions and stale-snapshot protection
+│   ├── batch_store.py        # Atomic SQLite and Firestore group persistence
 │   ├── review_tasks.py       # Cloud Tasks enqueueing and task deduplication
 │   ├── spaced_repetition.py  # Due selection and deterministic interval updates
 │   ├── telegram.py           # Telegram API client and HTML rendering
@@ -296,8 +313,8 @@ Preserve these invariants unless the task explicitly changes them:
 - SQLite and Firestore implement the same `Repository` contract;
 - repeated Telegram updates and review callbacks are idempotent, and repeated enqueue attempts use
   deterministic Cloud Task names; final Telegram delivery remains at-least-once;
-- review delivery does not increment `review_count`; Hard and Good reschedule a valid due word,
-  while Easy deletes it;
+- review delivery, answer reveal and selection do not increment `review_count`; only explicit
+  group completion reschedules unchanged due words, without deleting them;
 - production scheduled work is durable in Firestore or Cloud Tasks, not an in-process timer;
 - unit tests stay offline and deterministic;
 - `/clear` requires explicit confirmation and deletes learning data, not update-deduplication records.

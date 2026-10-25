@@ -9,11 +9,20 @@ from typing import Protocol
 
 from google.cloud import firestore
 
-from vocab_bot.models import DailyDelivery, PendingWord, StoredWord, VocabularyCard
+from vocab_bot.batch_store import FirestoreBatchStore, SQLiteBatchStore
+from vocab_bot.models import DailyDelivery, PendingWord, ReviewBatch, StoredWord, VocabularyCard
 from vocab_bot.spaced_repetition import ReviewGrade, is_due, schedule_review, select_due_words
 
 
 class Repository(Protocol):
+    def create_review_batch(self, batch: ReviewBatch) -> ReviewBatch: ...
+
+    def get_review_batch(self, batch_id: str) -> ReviewBatch | None: ...
+
+    def update_review_batch(
+        self, batch_id: str, revision: int, action: str, now: datetime
+    ) -> ReviewBatch | None: ...
+
     def claim_update(self, update_id: int) -> bool: ...
 
     def save_card(self, card: VocabularyCard) -> None: ...
@@ -84,13 +93,18 @@ def preserve_learning_state(incoming: StoredWord, existing: StoredWord) -> None:
     incoming.due_at = existing.due_at
 
 
-class SQLiteRepository:
+class SQLiteRepository(SQLiteBatchStore):
     def __init__(self, path: Path) -> None:
+        self.batch_path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(path, check_same_thread=False)
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.executescript(
             """
+            CREATE TABLE IF NOT EXISTS review_batches (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS words (
                 word TEXT PRIMARY KEY,
                 payload TEXT NOT NULL
@@ -157,20 +171,18 @@ class SQLiteRepository:
     def grade_review(
         self, word: str, grade: ReviewGrade, reviewed_at: datetime
     ) -> StoredWord | None:
-        with self.connection:
-            row = self.connection.execute(
-                "SELECT payload FROM words WHERE word = ?", (word,)
-            ).fetchone()
+        with self.batch_transaction() as connection:
+            row = connection.execute("SELECT payload FROM words WHERE word = ?", (word,)).fetchone()
             if not row:
                 return None
             item = StoredWord.model_validate_json(row[0])
             if not is_due(item, reviewed_at):
                 return None
             if grade is ReviewGrade.EASY:
-                self.connection.execute("DELETE FROM words WHERE word = ?", (word,))
+                connection.execute("DELETE FROM words WHERE word = ?", (word,))
                 return item
             scheduled = schedule_review(item, grade, reviewed_at=reviewed_at)
-            self.connection.execute(
+            connection.execute(
                 "UPDATE words SET payload = ? WHERE word = ?",
                 (scheduled.model_dump_json(), word),
             )
@@ -245,13 +257,14 @@ class SQLiteRepository:
                     0
                 ],
             }
+            self.connection.execute("DELETE FROM review_batches")
             self.connection.execute("DELETE FROM words")
             self.connection.execute("DELETE FROM pending_words")
             self.connection.execute("DELETE FROM deliveries")
         return counts
 
 
-class FirestoreRepository:
+class FirestoreRepository(FirestoreBatchStore):
     def __init__(self, project: str | None = None) -> None:
         self.client = firestore.Client(project=project)
 
@@ -369,6 +382,7 @@ class FirestoreRepository:
         self.client.collection("pending_words").document(word).delete()
 
     def clear_user_data(self) -> dict[str, int]:
+        self._delete_collection("review_batches")
         return {
             "words": self._delete_collection("words"),
             "pending_words": self._delete_collection("pending_words"),

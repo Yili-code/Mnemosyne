@@ -5,7 +5,7 @@ from collections.abc import Sequence
 
 import httpx
 
-from vocab_bot.models import QuestionAnswer, StoredWord, VocabularyCard
+from vocab_bot.models import QuestionAnswer, ReviewBatch, StoredWord, VocabularyCard
 from vocab_bot.spaced_repetition import ReviewGrade, encode_review_callback
 from vocab_bot.traditional_chinese import to_taiwan_traditional
 
@@ -41,6 +41,24 @@ class TelegramClient:
         except (httpx.HTTPError, ValueError):
             # httpx exceptions contain the request URL, which embeds the bot token.
             raise TelegramError("Telegram message delivery failed") from None
+
+    def edit_message(self, chat_id: int, message_id: int, text: str, *, reply_markup: dict) -> None:
+        try:
+            self._post(
+                "editMessageText",
+                {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": to_taiwan_traditional(text),
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                    "reply_markup": reply_markup,
+                },
+            )
+        except TelegramError as exc:
+            # A retried callback can already have rendered this durable revision.
+            if "message is not modified" not in str(exc).lower():
+                raise
 
     def answer_callback_query(self, callback_query_id: str, text: str) -> None:
         self._post(
@@ -237,5 +255,58 @@ Send me any English word or phrase. I'll reply with:
 /ask <code>question</code> — Ask a question without saving it
 /search <code>word or phrase</code> — Search saved vocabulary without adding anything
 
-/review — Review due words and schedule the next review
+/review — Recall groups of up to five words; mark only unfamiliar ones
 /clear — Delete all learning data after confirmation"""
+
+
+def _batch_preview(value: str, limit: int) -> str:
+    # Bound the escaped payload as well as UTF-16 length used by Telegram.
+    result = []
+    used = 0
+    for char in value:
+        escaped = html.escape(char)
+        size = len(escaped.encode("utf-16-le")) // 2
+        if used + size > limit - 1:
+            result.append("…")
+            break
+        result.append(escaped)
+        used += size
+    return "".join(result)
+
+
+def render_review_batch(batch: ReviewBatch) -> tuple[str, dict]:
+    prefix = f"batch:{batch.id}:{batch.revision}:"
+    if batch.stage == "completed":
+        text = (
+            "<b>這組複習已完成</b>\n\n"
+            f"記得：{batch.remembered_count} 個，已安排下次複習\n"
+            f"不熟：{batch.unfamiliar_count} 個，10 分鐘後到期"
+        )
+        if batch.skipped_count:
+            text += f"\n略過：{batch.skipped_count} 個（資料已變更）"
+        return text, {"inline_keyboard": []}
+    lines = [f"<b>一組 {len(batch.items)} 個詞</b>"]
+    for index, item in enumerate(batch.items):
+        word = _batch_preview(item.word, 240)
+        line = f"{index + 1}. <b>{word}</b>"
+        if batch.stage == "revealed":
+            meaning = _batch_preview("；".join(item.meanings_zh), 360)
+            line += f"\n{meaning}"
+        lines.append(line)
+    if batch.stage == "prompt":
+        lines.append("先看英文，回想意思，再一起核對答案。尚未更新複習排程。")
+        keyboard = [[{"text": "顯示答案", "callback_data": prefix + "reveal"}]]
+    else:
+        lines.append("只標記忘記或不確定的詞；其餘視為記得。按「完成這組」才更新排程。")
+        keyboard = [
+            [
+                {
+                    "text": ("[不熟] " if index in batch.unfamiliar else "")
+                    + f"{index + 1}. {item.word[:40]}",
+                    "callback_data": prefix + str(index),
+                }
+            ]
+            for index, item in enumerate(batch.items)
+        ]
+        keyboard.append([{"text": "完成這組", "callback_data": prefix + "done"}])
+    return "\n\n".join(lines), {"inline_keyboard": keyboard}

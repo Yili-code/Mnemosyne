@@ -57,3 +57,17 @@ def test_cloud_tasks_queue_treats_a_duplicate_task_as_success(monkeypatch) -> No
     payload = ReviewTaskPayload(chat_id=123, item=card_to_words(make_card())[0])
 
     queue.enqueue(payload, delivery_key="telegram-321")
+
+
+def test_batch_tasks_use_session_identity_and_preserve_worker_payload(monkeypatch) -> None:
+    client = FakeCloudTasksClient()
+    queue = make_queue(monkeypatch, client)
+    item = card_to_words(make_card())[0]
+    first = ReviewTaskPayload(chat_id=123, item=item, batch_id="a" * 24)
+    second = ReviewTaskPayload(chat_id=123, item=item, batch_id="b" * 24)
+    for payload in (first, first, second):
+        queue.enqueue(payload, delivery_key="daily-test")
+    tasks = [task for _, task in client.created]
+    assert tasks[0].name == tasks[1].name
+    assert tasks[0].name != tasks[2].name
+    assert json.loads(tasks[0].http_request.body)["batch_id"] == first.batch_id

@@ -4,6 +4,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from vocab_bot.batch_review import BATCH_SIZE, decode_batch_callback, make_batch
 from vocab_bot.gemini import GeminiClient, GeminiError
 from vocab_bot.models import DailyDelivery, PendingWord, ReviewTaskPayload
 from vocab_bot.repository import Repository
@@ -21,6 +22,7 @@ from vocab_bot.telegram import (
     clear_database_keyboard,
     render_card,
     render_question_answer,
+    render_review_batch,
     render_review_prompt,
     render_search_result,
     render_word_list,
@@ -201,6 +203,10 @@ class VocabularyService:
             )
             return
 
+        if data.startswith("batch:"):
+            self._handle_batch_callback(callback_id, chat_id, message_id, data)
+            return
+
         parsed = decode_review_callback(data)
         if parsed is None:
             self.telegram.answer_callback_query(callback_id, "無效的複習選項。")
@@ -229,6 +235,39 @@ class VocabularyService:
             message_id=message_id,
             text=text,
         )
+
+    def _handle_batch_callback(
+        self, callback_id: str, chat_id: int, message_id: object, data: str
+    ) -> None:
+        parsed = decode_batch_callback(data)
+        if parsed is None or not isinstance(message_id, int):
+            self.telegram.answer_callback_query(callback_id, "無效的複習選項。")
+            return
+        batch_id, revision, action = parsed
+        now = datetime.now(UTC)
+        batch = self.repository.update_review_batch(batch_id, revision, action, now)
+        if batch is None or (batch.stage != "completed" and batch.expires_at <= now):
+            self._finish_review_callback(
+                callback_id=callback_id,
+                chat_id=chat_id,
+                message_id=message_id,
+                text="這組複習已失效，請使用 /review 重新開始。",
+            )
+            return
+        text, keyboard = render_review_batch(batch)
+        try:
+            self.telegram.edit_message(chat_id, message_id, text, reply_markup=keyboard)
+        except TelegramError:
+            # The durable state is authoritative. An old callback re-renders it
+            # without repeating a selection or applying grades a second time.
+            logger.warning("Batch review display update failed")
+        try:
+            self.telegram.answer_callback_query(
+                callback_id,
+                "這組已完成。" if batch.stage == "completed" else "已更新，請依目前畫面操作。",
+            )
+        except TelegramError:
+            logger.warning("Batch review callback acknowledgement failed")
 
     def _handle_clear_callback(
         self,
@@ -342,14 +381,16 @@ class VocabularyService:
             return []
 
         batch_key = delivery_key or f"daily-{local_date}"
-        for item in chosen:
+        for offset in range(0, len(chosen), BATCH_SIZE):
+            items = chosen[offset : offset + BATCH_SIZE]
+            batch = self.repository.create_review_batch(make_batch(items, batch_key, now))
+            payload = ReviewTaskPayload(
+                chat_id=self.owner_chat_id, item=items[0], batch_id=batch.id
+            )
             if self.review_task_queue is None:
-                self.send_review_card(ReviewTaskPayload(chat_id=self.owner_chat_id, item=item))
+                self.send_review_card(payload)
             else:
-                self.review_task_queue.enqueue(
-                    ReviewTaskPayload(chat_id=self.owner_chat_id, item=item),
-                    delivery_key=batch_key,
-                )
+                self.review_task_queue.enqueue(payload, delivery_key=batch_key)
 
         selected_words = [item.word for item in chosen]
         if not force:
@@ -359,6 +400,16 @@ class VocabularyService:
     def send_review_card(self, payload: ReviewTaskPayload) -> None:
         if payload.chat_id != self.owner_chat_id:
             raise ValueError("Review task chat does not match the configured owner")
+        if payload.batch_id is not None:
+            batch = self.repository.get_review_batch(payload.batch_id)
+            if batch is None or batch.stage == "completed" or batch.expires_at <= datetime.now(UTC):
+                return
+            if not any(self.repository.get_word(item.word) is not None for item in batch.items):
+                return
+            text, keyboard = render_review_batch(batch)
+            self.telegram.send_message(payload.chat_id, text, reply_markup=keyboard)
+            return
+        # Keep tasks queued before the batch rollout compatible.
         current = self.repository.get_word(payload.item.word)
         if current is None:
             logger.info("Skipped queued review for deleted word=%s", payload.item.word)

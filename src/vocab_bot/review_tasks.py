@@ -30,7 +30,8 @@ class CloudTasksReviewQueue:
         self.cron_secret = cron_secret
 
     def enqueue(self, payload: ReviewTaskPayload, *, delivery_key: str) -> None:
-        digest = hashlib.sha256(f"{delivery_key}:{payload.item.word}".encode()).hexdigest()[:32]
+        identity = payload.batch_id or payload.item.word
+        digest = hashlib.sha256(f"{delivery_key}:{identity}".encode()).hexdigest()[:32]
         task = tasks_v2.Task(
             name=f"{self.parent}/tasks/review-{digest}",
             http_request=tasks_v2.HttpRequest(

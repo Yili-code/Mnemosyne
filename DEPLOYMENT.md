@@ -11,7 +11,7 @@ Google Cloud project、Telegram token 與 Gemini key 實際驗證。
 2. **Firestore 是永久記憶**：Cloud Run instance 可以消失，但單字、去重紀錄和複習狀態不能消失。
 3. **Secret Manager 是保險箱**：Telegram token、Gemini key 與 shared secrets 不放進 image 或 Git。
 4. **Webhook／Scheduler 是觸發器**：Telegram 觸發單字查詢，Scheduler 每天觸發複習。
-5. **Cloud Tasks 是傳送佇列**：一張複習卡是一個可重試工作，控制 Telegram 發送速度。
+5. **Cloud Tasks 是傳送佇列**：一組最多五個詞是一個可重試工作，控制 Telegram 發送速度。
 
 本專案不是在部署時「搬移 SQLite 資料庫」。切換方式是把 `STORAGE_BACKEND` 從 `sqlite` 改成
 `firestore`。`src/vocab_bot/app.py` 會依該值建立 `FirestoreRepository`，Google client library 再以
@@ -92,7 +92,7 @@ Cloud Run 使用的 service account 必須具備：
 gcloud run deploy mnemosyne --source . --region asia-east1 --allow-unauthenticated --min-instances 0 --max-instances 1 --memory 512Mi --timeout 60 --set-env-vars "STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,TELEGRAM_OWNER_CHAT_ID=YOUR_CHAT_ID,GEMINI_MODEL=gemini-3.5-flash-lite,REVIEW_SIZE=20,TIMEZONE=Asia/Taipei" --set-secrets "TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_WEBHOOK_SECRET=telegram-webhook-secret:latest,GEMINI_API_KEY=gemini-api-key:latest,CRON_SECRET=cron-secret:latest"
 ```
 
-先建立 review queue。單一 concurrency 保留卡片順序，每秒兩張避免瞬間送出整批：
+先建立 review queue。單一 concurrency 保留組別順序，每秒兩組避免瞬間送出整批：
 
 ```powershell
 gcloud tasks queues create mnemosyne-review --location asia-east1 --max-dispatches-per-second 2 --max-concurrent-dispatches 1 --max-attempts 5 --min-backoff 10s --max-backoff 300s
@@ -196,8 +196,8 @@ Cloud Run、Firestore、Cloud Scheduler 與 Gemini 各自有不同的免費額�
 - 傳送單字後收到完整卡片
 - Firestore 同時保存主單字與相關獨立單字
 - 同一 Telegram update retry 不會重複處理
-- Force run 收到 daily review；Hard／Good 顯示下次間隔，Easy 移除該詞彙
-- `/review` webhook 在數秒內回應，Cloud Tasks 隨後逐張送出卡片
+- Force run 收到每組最多五詞的 daily review；揭曉答案與標記不熟不改排程，完成這組後才排定 Good／Again，不刪除詞彙
+- `/review` webhook 在數秒內回應，Cloud Tasks 隨後逐組送出複習訊息
 - 同一天正常 scheduler retry 不會重複發送
 - Gemini 失敗時 Firestore 出現 `pending_words`，retry job 成功後該文件消失
 - Cloud Run logs 沒有出現 token 或 API key
@@ -220,3 +220,15 @@ Cloud Run、Firestore、Cloud Scheduler 與 Gemini 各自有不同的免費額�
 - redeploy 後單字消失：確認 production 是否誤用 SQLite。
 - Scheduler 顯示 success，但 Telegram 沒收到：success 只證明 endpoint 回應，仍要查 Telegram
   delivery 與 `daily_deliveries`。
+
+
+### 批次複習驗收
+
+- Firestore 會新增 `review_batches` collection，沿用既有 runtime 的 Datastore User 權限。
+- 複習途中重啟服務後，原訊息仍能繼續；完成與詞彙排程透過同一交易寫入。
+- 同一組重複按完成不應再次評分；其他組已更新的詞彙會略過。
+- `/clear` 也會刪除 batch sessions；舊按鈕不得修改重新加入的詞彙。
+- 七天後 session 失效，需 `/review` 重開；目前僅在 `/clear` 時刪除儲存的 sessions。
+- 新 worker 相容舊版已排入佇列的單張卡片；新批次 payload 不支援回滾至舊 worker。
+  若需回滾，先處理新批次工作；舊 worker 不理解新的 batch callbacks。
+- 不熟詞彙十分鐘後到期，不代表十分鐘後自動推播；仍由 `/review` 或既有每日排程選取。

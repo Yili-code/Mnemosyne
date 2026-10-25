@@ -3,6 +3,13 @@
 This file records user-visible changes to Mnemosyne. The project follows semantic versioning after
 the initial alpha release.
 
+## Unreleased
+
+- Review due expressions in groups of up to five: reveal meanings together, mark only unfamiliar
+  expressions, then complete the group once. Only completion updates schedules; no word is deleted.
+- Persist group progress and atomically complete eligible schedules in SQLite and Firestore, with
+  replay, expiry and stale-snapshot protection. Keep existing queued single cards compatible.
+
 ## 0.1.0 - 2026-09-29
 
 Initial public alpha.

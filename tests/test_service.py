@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from vocab_bot.batch_review import advance_batch, complete_batch
 from vocab_bot.gemini import GeminiError
 from vocab_bot.models import (
     AnswerSection,
@@ -19,12 +20,31 @@ from .test_repository import make_card
 
 class FakeRepository:
     def __init__(self) -> None:
+        self.batches = {}
         self.updates: set[int] = set()
         self.words: list[StoredWord] = []
         self.deliveries: dict[str, DailyDelivery] = {}
         self.pending: dict[str, PendingWord] = {}
         self.saved_cards = 0
         self.clear_calls = 0
+
+    def create_review_batch(self, batch):
+        return self.batches.setdefault(batch.id, batch)
+
+    def get_review_batch(self, batch_id):
+        return self.batches.get(batch_id)
+
+    def update_review_batch(self, batch_id, revision, action, now):
+        original = self.batches.get(batch_id)
+        if original is None:
+            return None
+        batch = advance_batch(original, revision, action, now)
+        if batch.revision != original.revision and batch.stage == "completed":
+            scheduled = complete_batch(batch, {item.word: item for item in self.words}, now)
+            replacements = {item.word: item for item in scheduled}
+            self.words = [replacements.get(item.word, item) for item in self.words]
+        self.batches[batch_id] = batch
+        return batch
 
     def claim_update(self, update_id: int) -> bool:
         if update_id in self.updates:
@@ -83,6 +103,7 @@ class FakeRepository:
             "pending_words": len(self.pending),
             "deliveries": len(self.deliveries),
         }
+        self.batches.clear()
         self.words.clear()
         self.pending.clear()
         self.deliveries.clear()
@@ -125,12 +146,16 @@ class PhraseGemini(FakeGemini):
 
 class FakeTelegram:
     def __init__(self) -> None:
+        self.edits = []
         self.messages: list[tuple[int, str, dict | None]] = []
         self.callback_answers: list[tuple[str, str]] = []
         self.removed_keyboards: list[tuple[int, int]] = []
 
     def send_message(self, chat_id: int, text: str, *, reply_markup: dict | None = None) -> None:
         self.messages.append((chat_id, text, reply_markup))
+
+    def edit_message(self, chat_id, message_id, text, *, reply_markup):
+        self.edits.append((chat_id, message_id, text, reply_markup))
 
     def answer_callback_query(self, callback_query_id: str, text: str) -> None:
         self.callback_answers.append((callback_query_id, text))
@@ -403,7 +428,9 @@ def test_review_queue_returns_without_sending_telegram_messages() -> None:
 
     assert len(selected) == 2
     assert not telegram.messages
-    assert [task.item.word for task, _ in queue.tasks] == selected
+    assert len(queue.tasks) == 1
+    batch = repository.get_review_batch(queue.tasks[0][0].batch_id)
+    assert [item.word for item in batch.items] == selected
     assert {delivery_key for _, delivery_key in queue.tasks} == {"telegram-321"}
 
 
