@@ -99,12 +99,24 @@ class DailyDelivery(BaseModel):
     sent_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class ReviewMessage(BaseModel):
+    message_id: int = Field(gt=0)
+    sent_at: datetime
+
+
+class ReviewCleanupPayload(BaseModel):
+    chat_id: int
+    batch_id: str = Field(pattern=r"^[a-f0-9]{24}$")
+    message_id: int = Field(gt=0)
+
+
 class ReviewBatch(BaseModel):
     id: str = Field(pattern=r"^[a-f0-9]{24}$")
     items: list[StoredWord] = Field(min_length=1, max_length=5)
     created_at: datetime
     expires_at: datetime
-    stage: Literal["prompt", "revealed", "completed"] = "prompt"
+    stage: Literal["prompt", "revealed", "completed", "expired"] = "prompt"
+    messages: list[ReviewMessage] = Field(default_factory=list)
     unfamiliar: list[int] = Field(default_factory=list)
     revision: int = Field(default=0, ge=0)
     remembered_count: int = 0

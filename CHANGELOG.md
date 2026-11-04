@@ -5,6 +5,12 @@ the initial alpha release.
 
 ## Unreleased
 
+- Limit scheduled review to one group of at most five words each day. Explicit manual requests
+  also return one group at a time.
+- Automatically delete a recorded Telegram review message after three hours without any valid
+  button interaction, using durable delayed Cloud Tasks. Preserve words, learning progress and
+  answered messages; retry failed deletion without resending the review.
+
 - Review due expressions in groups of up to five: reveal meanings together, mark only unfamiliar
   expressions, then complete the group once. Only completion updates schedules; no word is deleted.
 - Persist group progress and atomically complete eligible schedules in SQLite and Firestore, with

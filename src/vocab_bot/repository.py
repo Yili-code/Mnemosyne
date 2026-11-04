@@ -19,6 +19,14 @@ class Repository(Protocol):
 
     def get_review_batch(self, batch_id: str) -> ReviewBatch | None: ...
 
+    def record_review_message(
+        self, batch_id: str, message_id: int, sent_at: datetime
+    ) -> ReviewBatch | None: ...
+
+    def expire_review_message(
+        self, batch_id: str, message_id: int, now: datetime
+    ) -> ReviewBatch | None: ...
+
     def update_review_batch(
         self, batch_id: str, revision: int, action: str, now: datetime
     ) -> ReviewBatch | None: ...

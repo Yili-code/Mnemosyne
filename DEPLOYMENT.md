@@ -232,3 +232,20 @@ Cloud Run、Firestore、Cloud Scheduler 與 Gemini 各自有不同的免費額�
 - 新 worker 相容舊版已排入佇列的單張卡片；新批次 payload 不支援回滾至舊 worker。
   若需回滾，先處理新批次工作；舊 worker 不理解新的 batch callbacks。
 - 不熟詞彙十分鐘後到期，不代表十分鐘後自動推播；仍由 `/review` 或既有每日排程選取。
+
+
+### 未回覆訊息自動清理
+
+- 每日自動複習只選一組，最多五詞，既有 `REVIEW_SIZE` 大於五時仍只發五詞。
+- 每則新送出的複習訊息會記錄 Telegram message ID 與送出時間，並排入同一條 Cloud Tasks
+  queue，三小時後呼叫 `/tasks/cleanup-review`。沿用 `X-Cron-Secret` 與 owner-only 驗證。
+- 成功點擊「顯示答案」即算回應；已回應的組別不會自動刪除。完全未操作才刪 Telegram
+  訊息，單字與學習進度保留。每日計算沿用 `TIMEZONE`；手動 `/review` 仍可主動索取。
+- cleanup worker 先透過資料庫交易將組別設為 expired，再刪除訊息；刪除失敗由 Cloud Tasks
+  重試。「訊息已不存在」視為成功，其餘錯誤保留失敗。沒有使用程序內的三小時計時器。
+- direct 模式若設定 project/service URL，也會建立 cleanup queue client；沒有 queue 的
+  本機開發模式不會自行觸發清理，需要外部排程呼叫 cleanup endpoint。
+- 舊版已送出的訊息未記錄 message ID，不回溯刪除；切換前排入佇列但未送出的新版批次
+  工作會由新 worker 記錄 ID 並安排清理。舊單卡 payload 沿用既有相容流程。
+- queue 排隊與重試可能使實際刪除晚於三小時。Telegram 回應遺失或回應後、ID 寫入前中斷，
+  仍可能留下無法追蹤的訊息；不宣稱 exactly-once。

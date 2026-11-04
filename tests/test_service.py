@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from vocab_bot.batch_review import advance_batch, complete_batch
+from vocab_bot.batch_review import advance_batch, complete_batch, expire_unanswered, record_message
 from vocab_bot.gemini import GeminiError
 from vocab_bot.models import (
     AnswerSection,
@@ -33,6 +33,20 @@ class FakeRepository:
 
     def get_review_batch(self, batch_id):
         return self.batches.get(batch_id)
+
+    def record_review_message(self, batch_id, message_id, sent_at):
+        batch = self.batches.get(batch_id)
+        if batch is None:
+            return None
+        self.batches[batch_id] = record_message(batch, message_id, sent_at)
+        return self.batches[batch_id]
+
+    def expire_review_message(self, batch_id, message_id, now):
+        batch = self.batches.get(batch_id)
+        if batch is None:
+            return None
+        self.batches[batch_id] = expire_unanswered(batch, message_id, now)
+        return self.batches[batch_id]
 
     def update_review_batch(self, batch_id, revision, action, now):
         original = self.batches.get(batch_id)
@@ -146,6 +160,7 @@ class PhraseGemini(FakeGemini):
 
 class FakeTelegram:
     def __init__(self) -> None:
+        self.deleted_messages = []
         self.edits = []
         self.messages: list[tuple[int, str, dict | None]] = []
         self.callback_answers: list[tuple[str, str]] = []
@@ -153,6 +168,10 @@ class FakeTelegram:
 
     def send_message(self, chat_id: int, text: str, *, reply_markup: dict | None = None) -> None:
         self.messages.append((chat_id, text, reply_markup))
+        return len(self.messages)
+
+    def delete_message(self, chat_id, message_id):
+        self.deleted_messages.append((chat_id, message_id))
 
     def edit_message(self, chat_id, message_id, text, *, reply_markup):
         self.edits.append((chat_id, message_id, text, reply_markup))
@@ -167,9 +186,13 @@ class FakeTelegram:
 class FakeReviewTaskQueue:
     def __init__(self) -> None:
         self.tasks: list[tuple[ReviewTaskPayload, str]] = []
+        self.cleanup_tasks = []
 
     def enqueue(self, payload: ReviewTaskPayload, *, delivery_key: str) -> None:
         self.tasks.append((payload, delivery_key))
+
+    def enqueue_cleanup(self, payload, *, delete_at):
+        self.cleanup_tasks.append((payload, delete_at))
 
 
 class CallbackAckFailingTelegram(FakeTelegram):

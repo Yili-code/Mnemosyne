@@ -5,10 +5,11 @@ import json
 import re
 from datetime import datetime, timedelta
 
-from vocab_bot.models import ReviewBatch, StoredWord
+from vocab_bot.models import ReviewBatch, ReviewMessage, StoredWord
 from vocab_bot.spaced_repetition import ReviewGrade, is_due, schedule_review
 
 BATCH_SIZE = 5
+UNANSWERED_TIMEOUT = timedelta(hours=3)
 CALLBACK_PATTERN = re.compile(r"^batch:([a-f0-9]{24}):(\d{1,9}):(reveal|done|[0-4])$")
 
 
@@ -28,7 +29,11 @@ def decode_batch_callback(value: str) -> tuple[str, int, str] | None:
 
 def advance_batch(batch: ReviewBatch, revision: int, action: str, now: datetime) -> ReviewBatch:
     result = batch.model_copy(deep=True)
-    if batch.stage == "completed" or batch.expires_at <= now or batch.revision != revision:
+    if (
+        batch.stage in {"completed", "expired"}
+        or batch.expires_at <= now
+        or batch.revision != revision
+    ):
         return result
     if action == "reveal" and batch.stage == "prompt":
         result.stage = "revealed"
@@ -81,3 +86,24 @@ def complete_batch(
         else:
             batch.remembered_count += 1
     return scheduled
+
+
+def record_message(batch: ReviewBatch, message_id: int, sent_at: datetime) -> ReviewBatch:
+    result = batch.model_copy(deep=True)
+    if not any(message.message_id == message_id for message in result.messages):
+        result.messages.append(ReviewMessage(message_id=message_id, sent_at=sent_at))
+    return result
+
+
+def expire_unanswered(batch: ReviewBatch, message_id: int, now: datetime) -> ReviewBatch:
+    result = batch.model_copy(deep=True)
+    delivered = next((m for m in batch.messages if m.message_id == message_id), None)
+    if (
+        delivered is not None
+        and delivered.sent_at + UNANSWERED_TIMEOUT <= now
+        and batch.stage == "prompt"
+        and batch.revision == 0
+    ):
+        result.stage = "expired"
+        result.revision += 1
+    return result

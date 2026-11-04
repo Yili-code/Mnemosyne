@@ -7,7 +7,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 
 from vocab_bot.config import Settings
 from vocab_bot.gemini import GeminiClient
-from vocab_bot.models import ReviewTaskPayload
+from vocab_bot.models import ReviewCleanupPayload, ReviewTaskPayload
 from vocab_bot.repository import FirestoreRepository, Repository, SQLiteRepository
 from vocab_bot.review_tasks import CloudTasksReviewQueue
 from vocab_bot.service import VocabularyService
@@ -30,7 +30,7 @@ def get_service() -> VocabularyService:
     else:
         repository = SQLiteRepository(settings.sqlite_path)
     review_task_queue = None
-    if settings.review_delivery_mode == "cloud_tasks":
+    if settings.google_cloud_project and settings.cloud_run_service_url:
         review_task_queue = CloudTasksReviewQueue(
             project=settings.google_cloud_project or "",
             location=settings.cloud_tasks_location,
@@ -45,7 +45,10 @@ def get_service() -> VocabularyService:
         owner_chat_id=settings.telegram_owner_chat_id,
         review_size=settings.review_size,
         timezone=settings.timezone,
-        review_task_queue=review_task_queue,
+        review_task_queue=(
+            review_task_queue if settings.review_delivery_mode == "cloud_tasks" else None
+        ),
+        cleanup_task_queue=review_task_queue,
     )
 
 
@@ -102,3 +105,18 @@ def send_review_card(
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     return {"ok": True}
+
+
+@app.post("/tasks/cleanup-review")
+def cleanup_review(
+    payload: ReviewCleanupPayload,
+    x_cron_secret: str | None = Header(default=None),
+) -> dict[str, bool]:
+    settings = get_settings()
+    if not _matches(x_cron_secret, settings.cron_secret):
+        raise HTTPException(status_code=401, detail="Invalid cron secret")
+    try:
+        deleted = get_service().cleanup_review_message(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"ok": True, "deleted": deleted}

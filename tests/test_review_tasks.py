@@ -71,3 +71,24 @@ def test_batch_tasks_use_session_identity_and_preserve_worker_payload(monkeypatc
     assert tasks[0].name == tasks[1].name
     assert tasks[0].name != tasks[2].name
     assert json.loads(tasks[0].http_request.body)["batch_id"] == first.batch_id
+
+
+def test_cleanup_task_is_delayed_authenticated_and_deduplicated(monkeypatch):
+    from datetime import UTC, datetime
+
+    from vocab_bot.models import ReviewCleanupPayload
+
+    client = FakeCloudTasksClient()
+    queue = make_queue(monkeypatch, client)
+    payload = ReviewCleanupPayload(chat_id=123, batch_id="a" * 24, message_id=99)
+    delete_at = datetime(2026, 11, 4, 15, tzinfo=UTC)
+    queue.enqueue_cleanup(payload, delete_at=delete_at)
+    queue.enqueue_cleanup(payload, delete_at=delete_at)
+    task = client.created[0][1]
+    assert task.name == client.created[1][1].name
+    assert task.http_request.url.endswith("/tasks/cleanup-review")
+    assert task.http_request.headers["X-Cron-Secret"] == "secret-value"
+    assert task.schedule_time == delete_at
+    assert json.loads(task.http_request.body)["message_id"] == 99
+    duplicate = make_queue(monkeypatch, FakeCloudTasksClient(already_exists=True))
+    duplicate.enqueue_cleanup(payload, delete_at=delete_at)

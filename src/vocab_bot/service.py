@@ -4,9 +4,9 @@ import logging
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from vocab_bot.batch_review import BATCH_SIZE, decode_batch_callback, make_batch
+from vocab_bot.batch_review import BATCH_SIZE, UNANSWERED_TIMEOUT, decode_batch_callback, make_batch
 from vocab_bot.gemini import GeminiClient, GeminiError
-from vocab_bot.models import DailyDelivery, PendingWord, ReviewTaskPayload
+from vocab_bot.models import DailyDelivery, PendingWord, ReviewCleanupPayload, ReviewTaskPayload
 from vocab_bot.repository import Repository
 from vocab_bot.review_tasks import ReviewTaskQueue
 from vocab_bot.spaced_repetition import (
@@ -55,6 +55,7 @@ class VocabularyService:
         review_size: int,
         timezone: str,
         review_task_queue: ReviewTaskQueue | None = None,
+        cleanup_task_queue: ReviewTaskQueue | None = None,
     ) -> None:
         self.repository = repository
         self.gemini = gemini
@@ -63,6 +64,7 @@ class VocabularyService:
         self.review_size = review_size
         self.timezone = ZoneInfo(timezone)
         self.review_task_queue = review_task_queue
+        self.cleanup_task_queue = cleanup_task_queue
 
     def handle_update(self, update: dict) -> None:
         update_id = update.get("update_id")
@@ -246,7 +248,11 @@ class VocabularyService:
         batch_id, revision, action = parsed
         now = datetime.now(UTC)
         batch = self.repository.update_review_batch(batch_id, revision, action, now)
-        if batch is None or (batch.stage != "completed" and batch.expires_at <= now):
+        if (
+            batch is None
+            or batch.stage == "expired"
+            or (batch.stage != "completed" and batch.expires_at <= now)
+        ):
             self._finish_review_callback(
                 callback_id=callback_id,
                 chat_id=chat_id,
@@ -372,7 +378,7 @@ class VocabularyService:
         if previous and not force:
             return previous.words
 
-        chosen = self.repository.list_due_words(now, self.review_size)
+        chosen = self.repository.list_due_words(now, min(self.review_size, BATCH_SIZE))
         if not chosen:
             self.telegram.send_message(
                 self.owner_chat_id,
@@ -402,12 +408,37 @@ class VocabularyService:
             raise ValueError("Review task chat does not match the configured owner")
         if payload.batch_id is not None:
             batch = self.repository.get_review_batch(payload.batch_id)
-            if batch is None or batch.stage == "completed" or batch.expires_at <= datetime.now(UTC):
+            if (
+                batch is None
+                or batch.stage in {"completed", "expired"}
+                or batch.expires_at <= datetime.now(UTC)
+            ):
                 return
             if not any(self.repository.get_word(item.word) is not None for item in batch.items):
                 return
-            text, keyboard = render_review_batch(batch)
-            self.telegram.send_message(payload.chat_id, text, reply_markup=keyboard)
+            if not batch.messages:
+                text, keyboard = render_review_batch(batch)
+                message_id = self.telegram.send_message(
+                    payload.chat_id, text, reply_markup=keyboard
+                )
+                batch = self.repository.record_review_message(
+                    batch.id, message_id, datetime.now(UTC)
+                )
+                if batch is None:
+                    # /clear can race delivery; remove only the message just sent.
+                    self.telegram.delete_message(payload.chat_id, message_id)
+                    return
+            queue = self.cleanup_task_queue or self.review_task_queue
+            if queue is not None:
+                for message in batch.messages:
+                    queue.enqueue_cleanup(
+                        ReviewCleanupPayload(
+                            chat_id=payload.chat_id,
+                            batch_id=batch.id,
+                            message_id=message.message_id,
+                        ),
+                        delete_at=message.sent_at + UNANSWERED_TIMEOUT,
+                    )
             return
         # Keep tasks queued before the batch rollout compatible.
         current = self.repository.get_word(payload.item.word)
@@ -419,3 +450,20 @@ class VocabularyService:
             render_review_prompt(current),
             reply_markup=review_keyboard(current.word),
         )
+
+    def cleanup_review_message(
+        self, payload: ReviewCleanupPayload, *, now: datetime | None = None
+    ) -> bool:
+        if payload.chat_id != self.owner_chat_id:
+            raise ValueError("Review cleanup chat does not match the configured owner")
+        now = now or datetime.now(UTC)
+        batch = self.repository.expire_review_message(payload.batch_id, payload.message_id, now)
+        if batch is None or batch.stage != "expired":
+            return False
+        message = next((m for m in batch.messages if m.message_id == payload.message_id), None)
+        if message is None or message.sent_at + UNANSWERED_TIMEOUT > now:
+            return False
+        # Expiration commits before the network call. Retries remain eligible to
+        # delete; racing callbacks cannot grade a group once cleanup has claimed it.
+        self.telegram.delete_message(payload.chat_id, payload.message_id)
+        return True

@@ -322,7 +322,8 @@ def test_large_daily_selection_uses_groups_of_five_and_queue_survives_restart(tm
     queue = FakeReviewTaskQueue()
     service.review_task_queue = queue
     chosen = service.send_review(force=True, delivery_key="queued")
-    assert len(queue.tasks) == (len(chosen) + 4) // 5
+    assert len(chosen) == 5
+    assert len(queue.tasks) == 1
     assert not telegram.messages
     ids = [payload.batch_id for payload, _ in queue.tasks]
     assert len(ids) == len(set(ids))
@@ -467,4 +468,121 @@ def test_batch_completion_survives_expired_callback_ack(tmp_path):
     service.handle_update(callback(done))
     assert all(item.review_count == 1 for item in repository.list_words())
     assert telegram.edits[-1][3] == {"inline_keyboard": []}
+    repository.connection.close()
+
+
+@pytest.mark.parametrize("action", [None, "reveal"])
+def test_unanswered_expiry_is_durable_and_never_grades(store, action):
+    now = datetime.now(UTC)
+    batch = create_batch(store, now)
+    before = store.get_word("leverage")
+    batch = store.record_review_message(batch.id, 42, now)
+    assert batch.messages[0].message_id == 42
+    assert len(store.record_review_message(batch.id, 42, now).messages) == 1
+    assert store.expire_review_message(batch.id, 99, now + timedelta(hours=4)).stage == "prompt"
+    assert (
+        store.expire_review_message(batch.id, 42, now + timedelta(hours=3, microseconds=-1)).stage
+        == "prompt"
+    )
+    if action:
+        store.update_review_batch(batch.id, 0, action, now)
+    expired = store.expire_review_message(batch.id, 42, now + timedelta(hours=3))
+    assert expired.stage == ("revealed" if action else "expired")
+    assert store.get_word("leverage") == before
+    assert (
+        store.update_review_batch(batch.id, 0, "reveal", now + timedelta(hours=4)).stage
+        == expired.stage
+    )
+
+
+def test_cleanup_retries_failed_delete_and_rejects_mismatched_message(tmp_path):
+    from vocab_bot.models import ReviewCleanupPayload
+
+    service, repository, telegram = service_fixture(tmp_path)
+    queue = FakeReviewTaskQueue()
+    service.cleanup_task_queue = queue
+    service.send_review(force=True)
+    assert len(queue.cleanup_tasks) == 1
+    payload, delete_at = queue.cleanup_tasks[0]
+    batch = repository.get_review_batch(payload.batch_id)
+    assert delete_at == batch.messages[0].sent_at + timedelta(hours=3)
+    assert not service.cleanup_review_message(payload, now=delete_at - timedelta(seconds=1))
+    assert not service.cleanup_review_message(
+        payload.model_copy(update={"message_id": 99}), now=delete_at
+    )
+    with pytest.raises(ValueError, match="owner"):
+        service.cleanup_review_message(payload.model_copy(update={"chat_id": 999}), now=delete_at)
+    delete = telegram.delete_message
+
+    def fail(*args):
+        raise TelegramError("temporary failure")
+
+    telegram.delete_message = fail
+    with pytest.raises(TelegramError):
+        service.cleanup_review_message(payload, now=delete_at)
+    assert repository.get_review_batch(payload.batch_id).stage == "expired"
+    telegram.delete_message = delete
+    assert service.cleanup_review_message(payload, now=delete_at + timedelta(seconds=1))
+    assert telegram.deleted_messages == [(123, payload.message_id)]
+    assert all(item.review_count == 0 for item in repository.list_words())
+    service.handle_update(callback(f"batch:{payload.batch_id}:0:reveal"))
+    assert not telegram.edits
+    assert "失效" in telegram.callback_answers[-1][1]
+    assert not service.cleanup_review_message(
+        ReviewCleanupPayload(chat_id=123, batch_id="f" * 24, message_id=1), now=delete_at
+    )
+    repository.connection.close()
+
+
+def test_answered_group_is_never_auto_deleted(tmp_path):
+    service, repository, telegram = service_fixture(tmp_path)
+    queue = FakeReviewTaskQueue()
+    service.cleanup_task_queue = queue
+    service.send_review(force=True)
+    data = telegram.messages[0][2]["inline_keyboard"][0][0]["callback_data"]
+    service.handle_update(callback(data))
+    payload, delete_at = queue.cleanup_tasks[0]
+    assert not service.cleanup_review_message(payload, now=delete_at + timedelta(days=1))
+    assert not telegram.deleted_messages
+    repository.connection.close()
+
+
+def test_cleanup_enqueue_failure_retries_without_resending(tmp_path):
+    service, repository, telegram = service_fixture(tmp_path)
+    queue = FakeReviewTaskQueue()
+    service.review_task_queue = queue
+    service.send_review(force=True)
+    payload = queue.tasks[0][0]
+    enqueue = queue.enqueue_cleanup
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("queue unavailable")
+
+    queue.enqueue_cleanup = fail
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        service.send_review_card(payload)
+    assert len(telegram.messages) == 1
+    queue.enqueue_cleanup = enqueue
+    service.send_review_card(payload)
+    assert len(telegram.messages) == 1
+    assert len(queue.cleanup_tasks) == 1
+    repository.connection.close()
+
+
+def test_expiry_and_reveal_serialize_without_grading(tmp_path):
+    repository = SQLiteRepository(tmp_path / "race.sqlite3")
+    repository.save_card(make_card())
+    now = datetime.now(UTC)
+    batch = create_batch(repository, now)
+    repository.record_review_message(batch.id, 42, now)
+    deadline = now + timedelta(hours=3)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reveal = pool.submit(repository.update_review_batch, batch.id, 0, "reveal", deadline)
+        expiry = pool.submit(repository.expire_review_message, batch.id, 42, deadline)
+        reveal.result()
+        expiry.result()
+    final = repository.get_review_batch(batch.id)
+    assert final.stage in {"revealed", "expired"}
+    assert final.revision == 1
+    assert repository.get_word("leverage").review_count == 0
     repository.connection.close()

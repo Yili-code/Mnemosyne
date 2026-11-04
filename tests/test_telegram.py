@@ -120,7 +120,9 @@ def test_send_message_converts_simplified_chinese_before_delivery(monkeypatch) -
 
     def fake_post(url, *, json, timeout):
         captured.update(json)
-        return httpx.Response(200, request=httpx.Request("POST", url), json={"ok": True})
+        return httpx.Response(
+            200, request=httpx.Request("POST", url), json={"ok": True, "result": {"message_id": 99}}
+        )
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
@@ -134,7 +136,9 @@ def test_callback_answer_converts_simplified_chinese_before_delivery(monkeypatch
 
     def fake_post(url, *, json, timeout):
         captured.update(json)
-        return httpx.Response(200, request=httpx.Request("POST", url), json={"ok": True})
+        return httpx.Response(
+            200, request=httpx.Request("POST", url), json={"ok": True, "result": {"message_id": 99}}
+        )
 
     monkeypatch.setattr(httpx, "post", fake_post)
 
@@ -157,3 +161,27 @@ def test_telegram_error_suppresses_the_token_bearing_provider_exception(monkeypa
 
     assert captured.value.__cause__ is None
     assert captured.value.__suppress_context__ is True
+
+
+@pytest.mark.parametrize(
+    "description,raises",
+    [
+        ("message to delete not found", False),
+        ("network error", True),
+        ("message can't be deleted", True),
+    ],
+)
+def test_delete_message_treats_only_already_deleted_as_success(monkeypatch, description, raises):
+    client = TelegramClient("secret-token")
+
+    def post(method, payload):
+        assert method == "deleteMessage"
+        assert payload == {"chat_id": 123, "message_id": 99}
+        raise TelegramError(description)
+
+    monkeypatch.setattr(client, "_post", post)
+    if raises:
+        with pytest.raises(TelegramError):
+            client.delete_message(123, 99)
+    else:
+        client.delete_message(123, 99)

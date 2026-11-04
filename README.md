@@ -168,14 +168,28 @@ FastAPI / Cloud Run ──► VocabularyService ──► Gemini API
 **Review delivery**
 
 1. `/review` or `POST /tasks/daily-review` selects words whose `due_at` has passed.
-2. Groups contain at most five expressions. `REVIEW_SIZE` still limits the total due-word selection;
-   the default 20 produces at most four group messages. Production enqueues one Cloud Task per group.
+2. Scheduled review sends one group per day with at most five expressions, capped by
+   `min(REVIEW_SIZE, 5)`. Manual `/review` requests also return at most one group. Production
+   enqueues one Cloud Task for the group.
 3. Each message starts with English expressions only. Reveal all meanings, then toggle only the
    unfamiliar expressions. Revealing and selecting do not change learning progress.
 4. Completing a revealed group atomically saves its result and all eligible word schedules.
    Unmarked expressions receive Good (initially 3 days); unfamiliar expressions receive Again
    (10 minutes). No word is deleted. A due time is eligibility for the next `/review` or daily run,
    not a promise of another notification in 10 minutes.
+
+Delivered message IDs and send times are durable. A Cloud Task is scheduled three hours after
+sending to delete the Telegram message only if no valid reveal/selection/completion occurred.
+Deletion never grades or removes vocabulary. Answered groups remain visible. The cleanup worker
+atomically expires unanswered groups before deletion, preventing racing callbacks from grading them;
+transient Telegram failures retry safely. Retried delivery reuses recorded messages instead of
+sending again when cleanup enqueueing failed. Ambiguous Telegram delivery before the message ID is
+persisted remains an at-least-once boundary. Existing messages sent before this version have no
+recorded IDs and are not retroactively deleted.
+
+Automatic cleanup requires Cloud Tasks configuration (`GOOGLE_CLOUD_PROJECT` and
+`CLOUD_RUN_SERVICE_URL`); this also works with direct message delivery when those are set. A local
+instance without a task queue needs an external caller to the protected cleanup endpoint.
 
 Batch sessions are durable in SQLite or Firestore (`review_batches`). They expire after seven days;
 expired or cleared sessions cannot grade words. Stale learning snapshots are skipped, and callback
@@ -201,6 +215,7 @@ callbacks from before this change remain compatible; an old Easy button still de
 | `POST /telegram/webhook` | Telegram | webhook secret header | Messages and callbacks |
 | `POST /tasks/daily-review` | Cloud Scheduler | `X-Cron-Secret` | Daily due-word selection |
 | `POST /tasks/retry-failed` | Cloud Scheduler | `X-Cron-Secret` | Process one failed generation |
+| `POST /tasks/cleanup-review` | Cloud Tasks | `X-Cron-Secret` | Delete a recorded unanswered message after three hours |
 | `POST /tasks/send-review-card` | Cloud Tasks | `X-Cron-Secret` | Deliver one queued review group (legacy cards accepted) |
 
 ## Project structure
@@ -250,7 +265,7 @@ commits, screenshots, logs, issues, or test fixtures.
 | `CLOUD_RUN_SERVICE_URL` | webhook setup or `cloud_tasks` mode | deployed HTTPS base URL |
 | `CLOUD_TASKS_QUEUE` | `cloud_tasks` mode | `mnemosyne-review` |
 | `CLOUD_TASKS_LOCATION` | `cloud_tasks` mode | `asia-east1` |
-| `REVIEW_SIZE` | review selection | `20`; integer from 1 to 50 |
+| `REVIEW_SIZE` | review selection | `20`; integer from 1 to 50; effective group limit is 5 |
 | `TIMEZONE` | daily delivery date | `Asia/Taipei`; valid IANA timezone |
 
 `Settings.from_env()` loads the whole runtime configuration lazily on the first non-health request.

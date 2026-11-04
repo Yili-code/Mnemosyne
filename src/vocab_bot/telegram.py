@@ -19,7 +19,7 @@ class TelegramClient:
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.timeout = timeout
 
-    def send_message(self, chat_id: int, text: str, *, reply_markup: dict | None = None) -> None:
+    def send_message(self, chat_id: int, text: str, *, reply_markup: dict | None = None) -> int:
         payload: dict[str, object] = {
             "chat_id": chat_id,
             "text": to_taiwan_traditional(text),
@@ -38,9 +38,21 @@ class TelegramClient:
             payload = response.json()
             if not isinstance(payload, dict) or not payload.get("ok"):
                 raise TelegramError("Telegram rejected the message")
+            result = payload.get("result")
+            message_id = result.get("message_id") if isinstance(result, dict) else None
+            if not isinstance(message_id, int) or message_id <= 0:
+                raise TelegramError("Telegram did not return a message ID")
+            return message_id
         except (httpx.HTTPError, ValueError):
             # httpx exceptions contain the request URL, which embeds the bot token.
             raise TelegramError("Telegram message delivery failed") from None
+
+    def delete_message(self, chat_id: int, message_id: int) -> None:
+        try:
+            self._post("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
+        except TelegramError as exc:
+            if "message to delete not found" not in str(exc).lower():
+                raise
 
     def edit_message(self, chat_id: int, message_id: int, text: str, *, reply_markup: dict) -> None:
         try:
@@ -276,6 +288,8 @@ def _batch_preview(value: str, limit: int) -> str:
 
 def render_review_batch(batch: ReviewBatch) -> tuple[str, dict]:
     prefix = f"batch:{batch.id}:{batch.revision}:"
+    if batch.stage == "expired":
+        return "這組複習未操作已逾時，請使用 /review。", {"inline_keyboard": []}
     if batch.stage == "completed":
         text = (
             "<b>這組複習已完成</b>\n\n"
@@ -294,7 +308,7 @@ def render_review_batch(batch: ReviewBatch) -> tuple[str, dict]:
             line += f"\n{meaning}"
         lines.append(line)
     if batch.stage == "prompt":
-        lines.append("先看英文，回想意思，再一起核對答案。尚未更新複習排程。")
+        lines.append("先看英文，回想意思，再一起核對答案。3 小時內未操作會自動刪除此訊息。")
         keyboard = [[{"text": "顯示答案", "callback_data": prefix + "reveal"}]]
     else:
         lines.append("只標記忘記或不確定的詞；其餘視為記得。按「完成這組」才更新排程。")
